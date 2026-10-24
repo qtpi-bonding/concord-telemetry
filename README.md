@@ -93,7 +93,7 @@ string), `.via`; its serde JSON uses `verifiedBy` (pbjson-compatible).
 ## Error records
 
 `concord_telemetry::error!(&err, rpc.method = %m)` and
-`error_anyhow!(&err, source = X::NAME)` record `error.code`, `error.class`,
+`error_anyhow!(&err, source = X::NAME)` (without `source`, the error code is the source label) record `error.code`, `error.class`,
 `error.fingerprint`, `error.source` and your fields, never the error's Display
 text. A panic is recorded as `concord.process.panic` (class unknown, source the
 panic location).

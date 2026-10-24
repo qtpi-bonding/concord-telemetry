@@ -117,3 +117,35 @@ fn records_facts_without_display_text() {
             .all(|(_, value)| !value.contains("boom"))
     }));
 }
+
+#[test]
+fn error_anyhow_without_source_uses_the_code() {
+    let records = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Capture(records.clone()));
+    tracing::subscriber::with_default(subscriber, || {
+        let coded = coded_error::into_anyhow(ActionError::NotFound);
+        error_anyhow!(&coded, rpc.method = "GetAction");
+        error_anyhow!(&anyhow::anyhow!("boom"));
+    });
+    let records = records.lock().unwrap();
+    let get =
+        |r: &Recorded, name: &str| r.fields.iter().find(|(f, _)| f == name).unwrap().1.clone();
+    assert_eq!(
+        get(&records[0], "error.source"),
+        "\"test.action.not_found\""
+    );
+    assert_eq!(get(&records[0], "rpc.method"), "\"GetAction\"");
+    assert_eq!(
+        get(&records[0], "error.fingerprint"),
+        format!(
+            "\"{}\"",
+            coded_error::fingerprint(
+                "test.action.not_found",
+                coded_error::ErrorClass::Logical,
+                "test.action.not_found"
+            )
+        )
+    );
+    assert_eq!(get(&records[1], "error.code"), "\"unknown\"");
+    assert_eq!(get(&records[1], "error.source"), "\"unknown\"");
+}
