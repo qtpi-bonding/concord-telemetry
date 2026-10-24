@@ -26,4 +26,8 @@ enum Verification {
   VERIFICATION_DELEGATION_CERT = 3;
   VERIFICATION_OWNER_DOCUMENT = 4;
   VERIFICATION_DAEMON_SESSION_CERT = 5;
+  // The caller answered a fresh challenge with a signature (proof of possession).
+  VERIFICATION_CHALLENGE_PROOF = 6;
+  // The statement is signed by the principal's root key.
+  VERIFICATION_ROOT_SIGNATURE = 7;
 }

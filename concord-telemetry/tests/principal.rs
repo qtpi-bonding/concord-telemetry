@@ -50,3 +50,53 @@ fn principal_inside_a_serde_struct() {
         h
     );
 }
+
+#[test]
+fn challenge_and_root_signature_verifications() {
+    assert_eq!(Verification::ChallengeProof as i32, 6);
+    assert_eq!(Verification::RootSignature as i32, 7);
+    assert_eq!(
+        Verification::from_str_name("VERIFICATION_CHALLENGE_PROOF"),
+        Some(Verification::ChallengeProof)
+    );
+    assert_eq!(
+        Verification::from_str_name("VERIFICATION_ROOT_SIGNATURE"),
+        Some(Verification::RootSignature)
+    );
+    let p = Principal::new(PrincipalKind::Agent, "k")
+        .with_verified_by([Verification::ChallengeProof, Verification::RootSignature]);
+    assert_eq!(
+        p.verified_by_attr(),
+        r#"["VERIFICATION_CHALLENGE_PROOF","VERIFICATION_ROOT_SIGNATURE"]"#
+    );
+    assert_eq!(Principal::decode(&p.encode_to_vec()[..]).unwrap(), p);
+    let v = serde_json::to_value(&p).unwrap();
+    assert_eq!(serde_json::from_value::<Principal>(v).unwrap(), p);
+}
+
+// The hand-written Rust enum must stay in step with the shipped .proto.
+#[test]
+fn rust_verification_matches_proto_file() {
+    let proto =
+        include_str!("../../concord-telemetry-proto/proto/concord_telemetry/v1/principal.proto");
+    let body = proto
+        .split("enum Verification {")
+        .nth(1)
+        .unwrap()
+        .split('}')
+        .next()
+        .unwrap();
+    let mut n = 0;
+    for line in body
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("VERIFICATION_"))
+    {
+        let (name, num) = line.trim_end_matches(';').split_once(" = ").unwrap();
+        let v =
+            Verification::from_str_name(name).unwrap_or_else(|| panic!("{name} missing in Rust"));
+        assert_eq!(v as i32, num.parse::<i32>().unwrap(), "{name}");
+        n += 1;
+    }
+    assert_eq!(n, 8);
+}

@@ -7,12 +7,8 @@ $SLOT cargo fmt --all -- --check
 $SLOT cargo clippy --workspace --all-targets --all-features -- -D warnings
 $SLOT cargo test --workspace --all-features
 $SLOT cargo check -p concord-telemetry --no-default-features
-# Consumers must never see opentelemetry directly: the direct dependents of `opentelemetry`
-# must be exactly this allowlist (an explicit compare, not a grep).
-deps="$($SLOT cargo tree -p concord-telemetry -e normal -i opentelemetry --depth 1 --prefix none | awk '{print $1}' | sort -u)"
-allowed="$(printf '%s\n' concord-telemetry opentelemetry opentelemetry-appender-tracing opentelemetry-http opentelemetry-otlp opentelemetry-proto opentelemetry_sdk tracing-opentelemetry | sort -u)"
-unexpected="$(comm -23 <(printf '%s\n' "$deps") <(printf '%s\n' "$allowed"))"
-if [ -n "$unexpected" ]; then echo "unexpected dependents of opentelemetry: $unexpected" >&2; exit 1; fi
+# Consumers must never see opentelemetry directly (explicit depth-1 allowlist; shared with consumers).
+CARGO_SLOT="$SLOT" scripts/check-otel-dependents.sh -p concord-telemetry concord-telemetry
 # No tonic in this crate's tree. `cargo tree -i tonic` exits non-zero when the package is absent (the pass case),
 # and an `if` (not a `!` pipeline) is what lets `set -e` see a failure.
 if $SLOT cargo tree -p concord-telemetry -e normal -i tonic >/dev/null 2>&1; then

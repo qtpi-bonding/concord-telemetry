@@ -32,6 +32,8 @@ pub mod v1 {
         DelegationCert = 3,
         OwnerDocument = 4,
         DaemonSessionCert = 5,
+        ChallengeProof = 6,
+        RootSignature = 7,
     }
 }
 
@@ -104,6 +106,8 @@ impl Verification {
             Self::DelegationCert => "VERIFICATION_DELEGATION_CERT",
             Self::OwnerDocument => "VERIFICATION_OWNER_DOCUMENT",
             Self::DaemonSessionCert => "VERIFICATION_DAEMON_SESSION_CERT",
+            Self::ChallengeProof => "VERIFICATION_CHALLENGE_PROOF",
+            Self::RootSignature => "VERIFICATION_ROOT_SIGNATURE",
         }
     }
 
@@ -115,6 +119,8 @@ impl Verification {
             "VERIFICATION_DELEGATION_CERT" => Some(Self::DelegationCert),
             "VERIFICATION_OWNER_DOCUMENT" => Some(Self::OwnerDocument),
             "VERIFICATION_DAEMON_SESSION_CERT" => Some(Self::DaemonSessionCert),
+            "VERIFICATION_CHALLENGE_PROOF" => Some(Self::ChallengeProof),
+            "VERIFICATION_ROOT_SIGNATURE" => Some(Self::RootSignature),
             _ => None,
         }
     }

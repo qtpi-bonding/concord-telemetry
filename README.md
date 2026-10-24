@@ -46,6 +46,38 @@ which also reaches enums and oneofs):
 .extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")
 ```
 
+### Importing `principal.proto` from your build
+
+An event proto with a `Principal` field imports
+`concord_telemetry/v1/principal.proto`. Build scripts get its include path from
+`concord-telemetry-proto`, which has no dependencies (never put `concord-telemetry`
+itself in `[build-dependencies]`: that compiles the OpenTelemetry stack into
+your build-script graph):
+
+```toml
+[dependencies]
+concord-telemetry = { git = "https://github.com/qtpi-bonding/concord-telemetry.git", rev = "<revision>" }
+[build-dependencies]
+concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telemetry.git", rev = "<revision>" }
+```
+
+```rust
+// build.rs
+let includes = [PathBuf::from("proto"), concord_telemetry_proto::proto_include_dir()];
+let descriptor = PathBuf::from(std::env::var("OUT_DIR")?).join("descriptor.bin");
+prost_build::Config::new()   // or tonic_build::configure()
+    .file_descriptor_set_path(&descriptor)
+    .extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")
+    .compile_protos(&["proto/yours/v1/events.proto"], &includes)?;
+pbjson_build::Builder::new()
+    .register_descriptors(&std::fs::read(&descriptor)?)?
+    .extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")
+    .build(&[".yours.v1"])?;
+```
+
+Both `extern_path` calls are needed: prost for the message, pbjson for serde.
+`proto-consumer-test/` is a working copy of this build, run by `scripts/check.sh`.
+
 The derive needs `as_str_name`/`from_str_name` on enums, which prost-build
 emits. Rules: scalars, strings, enums (by name), `Timestamp`/`Duration`
 (`prost_types`, `pbjson_types`, `identity_crypto`; rendered with `Z`),
@@ -92,7 +124,14 @@ Known limits: span macros and `#[instrument(fields(..))]` are not checked;
 
 ## Checks
 
+`scripts/check-otel-dependents.sh [-p PACKAGE] ALLOWED_CRATE...` is reusable in
+your own workspace: it fails if any crate outside the OpenTelemetry family and
+the crates you name (normally `concord-telemetry`) depends directly on
+`opentelemetry`, using `cargo tree -e normal -i opentelemetry --depth 1`. Without
+`-p` it checks the whole workspace. It runs cargo through `$CARGO_SLOT` when set.
+Copy it or call it from a pinned checkout; do not rewrite it in your check script.
+
 `scripts/check.sh` (through the compile slots): fmt, clippy, tests, the
-no-default-features build, the opentelemetry dependents allowlist, no tonic, no
+no-default-features build, the opentelemetry dependents allowlist (`scripts/check-otel-dependents.sh`), no tonic, no
 rustls in the default tree, and the lint on this repo. `collector/otel-collector.yaml`
 is an example collector config for the end-to-end stack.

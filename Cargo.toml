@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["concord-telemetry", "concord-telemetry-derive", "concord-lint"]
+members = ["concord-telemetry-proto", "proto-consumer-test", "concord-telemetry", "concord-telemetry-derive", "concord-lint"]
 
 [workspace.package]
 edition = "2021"

@@ -1,0 +1,11 @@
+[package]
+name = "concord-telemetry-proto"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Include path for concord_telemetry/v1/principal.proto, light enough for build-dependencies"
+
+# No dependencies on purpose: a consumer's build.rs must not pull the
+# OpenTelemetry stack just to find a .proto file.
+[dependencies]

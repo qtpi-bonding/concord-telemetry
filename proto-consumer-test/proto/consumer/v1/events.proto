@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package consumer.v1;
+
+import "concord_telemetry/v1/principal.proto";
+
+message ThingHappened {
+  string source_record_id = 1;
+  concord_telemetry.v1.Principal principal = 2;
+}
