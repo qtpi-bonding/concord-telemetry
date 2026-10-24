@@ -58,6 +58,8 @@ fn exporter_does_not_export_its_own_feedback() {
     let mut config = Config::new("feedback", "0");
     config.local = LocalOutput::Off;
     let guard = init(config).expect("init");
+    let span = tracing::info_span!("feedback-span");
+    let _entered = span.enter();
     tracing::info!("one record");
     let first_deadline = Instant::now() + Duration::from_secs(3);
     while count.load(std::sync::atomic::Ordering::Relaxed) == 0 {
@@ -67,6 +69,7 @@ fn exporter_does_not_export_its_own_feedback() {
         );
         thread::sleep(Duration::from_millis(20));
     }
+    thread::sleep(Duration::from_secs(3));
     let first = count.load(std::sync::atomic::Ordering::Relaxed);
     thread::sleep(Duration::from_secs(3));
     let second = count.load(std::sync::atomic::Ordering::Relaxed);

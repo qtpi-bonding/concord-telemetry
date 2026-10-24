@@ -4,9 +4,15 @@ const CHILD: &str = "CONCORD_JSON_CHILD";
 
 #[test]
 fn writes_json_records_to_file_and_not_stdout() {
+    let child_path =
+        std::env::temp_dir().join(format!("concord-json-child-{}.log", std::process::id()));
     if std::env::var_os(CHILD).is_some() {
         let mut config = Config::new("json-child", "0");
-        config.local = LocalOutput::JsonFile(std::env::temp_dir().join("concord-json-child.log"));
+        config.local = LocalOutput::JsonFile(
+            std::env::var_os("CONCORD_JSON_CHILD_PATH")
+                .map(std::path::PathBuf::from)
+                .expect("child log path"),
+        );
         let guard = init(config).expect("child init");
         tracing::info!(action_id = "a1", "sent");
         drop(guard);
@@ -30,11 +36,15 @@ fn writes_json_records_to_file_and_not_stdout() {
         .arg("writes_json_records_to_file_and_not_stdout")
         .arg("--nocapture")
         .env(CHILD, "1")
+        .env("CONCORD_JSON_CHILD_PATH", &child_path)
         .output()
         .expect("run child test");
+    assert!(output.status.success(), "child failed: {:?}", output.status);
+    let child_content = std::fs::read_to_string(&child_path).expect("read child json");
+    assert!(child_content.contains("\"action_id\":\"a1\""));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!stdout
-        .lines()
-        .any(|line| { line.contains("\"message\":\"sent\"") || line.contains("action_id") }));
+    assert!(!stdout.contains("sent"));
+    assert!(!stdout.contains("action_id"));
     let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_file(child_path);
 }

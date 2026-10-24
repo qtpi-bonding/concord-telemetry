@@ -81,7 +81,7 @@ fn exports_logs_and_traces_over_http() {
     config.principal = Some(Principal::new(PrincipalKind::Agent, "agent-1"));
     let guard = init(config).expect("init");
     tracing::info!(target: "http-test", "log record");
-    tracing::event!(name: "test.events.v1.X", target: EVENT_TARGET, tracing::Level::INFO, marker = "event-value");
+    tracing::event!(name: "test.events.v1.X", target: EVENT_TARGET, tracing::Level::INFO, marker = "event-value", asserted_field = "asserted-value");
     let span = tracing::info_span!("exported-span");
     let entered = span.enter();
     tracing::info!("inside exported span");
@@ -137,6 +137,22 @@ fn exports_logs_and_traces_over_http() {
         .flat_map(|scope| scope.log_records.iter())
         .find(|record| record.event_name == "test.events.v1.X")
         .expect("event log record");
+    let plain = logs
+        .resource_logs
+        .iter()
+        .flat_map(|resource| resource.scope_logs.iter())
+        .flat_map(|scope| scope.log_records.iter())
+        .find(|record| {
+            matches!(
+                record.body.as_ref().and_then(|body| body.value.as_ref()),
+                Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "log record"
+            )
+        })
+        .expect("plain info log record");
+    assert!(matches!(
+        plain.body.as_ref().and_then(|body| body.value.as_ref()),
+        Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "log record"
+    ));
     let marker = log
         .attributes
         .iter()
@@ -145,6 +161,15 @@ fn exports_logs_and_traces_over_http() {
     assert!(
         matches!(marker.value.as_ref().and_then(|value| value.value.as_ref()), Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "event-value")
     );
+    let asserted_field = log
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key == "asserted_field")
+        .expect("event asserted field attribute");
+    assert!(matches!(
+        asserted_field.value.as_ref().and_then(|value| value.value.as_ref()),
+        Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "asserted-value"
+    ));
     let resource = logs
         .resource_logs
         .iter()
@@ -172,6 +197,9 @@ fn exports_logs_and_traces_over_http() {
     );
     assert!(
         matches!(resource_value("principal.id"), Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "agent-1")
+    );
+    assert!(
+        matches!(resource_value("principal.verified_by"), Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "[]")
     );
 
     let traces =
