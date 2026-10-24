@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+SLOT=/Users/aicoder/Documents/systematic-action/scripts/cargo-slot
+[ -x "$SLOT" ] || { echo "cargo-slot missing at $SLOT" >&2; exit 2; }   # never bypass the compile slots
+$SLOT cargo fmt --all -- --check
+$SLOT cargo clippy --workspace --all-targets --all-features -- -D warnings
+$SLOT cargo test --workspace --all-features
+$SLOT cargo check -p concord-telemetry --no-default-features
+# Consumers must never see opentelemetry directly: the direct dependents of `opentelemetry`
+# must be exactly this allowlist (an explicit compare, not a grep).
+deps="$($SLOT cargo tree -p concord-telemetry -e normal -i opentelemetry --depth 1 --prefix none | awk '{print $1}' | sort -u)"
+allowed="$(printf '%s\n' concord-telemetry opentelemetry opentelemetry-appender-tracing opentelemetry-http opentelemetry-otlp opentelemetry-proto opentelemetry_sdk tracing-opentelemetry | sort -u)"
+unexpected="$(comm -23 <(printf '%s\n' "$deps") <(printf '%s\n' "$allowed"))"
+if [ -n "$unexpected" ]; then echo "unexpected dependents of opentelemetry: $unexpected" >&2; exit 1; fi
+# No tonic in this crate's tree. `cargo tree -i tonic` exits non-zero when the package is absent (the pass case),
+# and an `if` (not a `!` pipeline) is what lets `set -e` see a failure.
+if $SLOT cargo tree -p concord-telemetry -e normal -i tonic >/dev/null 2>&1; then
+  echo "tonic is in concord-telemetry's tree" >&2; exit 1
+fi
+# No TLS stack in the default build (plain HTTP; TLS only behind the `tls` feature).
+if $SLOT cargo tree -p concord-telemetry -e normal -i rustls >/dev/null 2>&1; then
+  echo "rustls is in concord-telemetry's default tree; it belongs behind the tls feature" >&2; exit 1
+fi
+# The lint passes on this repo itself.
+$SLOT cargo run -q -p concord-lint -- concord-telemetry/src concord-lint/src

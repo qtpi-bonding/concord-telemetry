@@ -1,0 +1,16 @@
+# image: otel/opentelemetry-collector-contrib:<exact version, pinned by the orchestrator>
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+exporters:
+  debug:
+    verbosity: detailed
+  file:
+    path: /var/otel/out.jsonl      # OTLP JSON, one object per line
+    flush_interval: 1s
+service:
+  pipelines:
+    logs:   { receivers: [otlp], exporters: [debug, file] }
+    traces: { receivers: [otlp], exporters: [debug, file] }
