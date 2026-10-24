@@ -157,8 +157,8 @@ dependencies = [
 
 [[package]]
 name = "coded-error"
-version = "0.1.0"
-source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=9914ab6f084179dff1170087d34ed6322b83bb5d#9914ab6f084179dff1170087d34ed6322b83bb5d"
+version = "0.2.0"
+source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=61c2a6daed4e795ab2941629cb9fa1beec55b90a#61c2a6daed4e795ab2941629cb9fa1beec55b90a"
 dependencies = [
  "anyhow",
  "coded-error-derive",
@@ -167,8 +167,8 @@ dependencies = [
 
 [[package]]
 name = "coded-error-derive"
-version = "0.1.0"
-source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=9914ab6f084179dff1170087d34ed6322b83bb5d#9914ab6f084179dff1170087d34ed6322b83bb5d"
+version = "0.2.0"
+source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=61c2a6daed4e795ab2941629cb9fa1beec55b90a#61c2a6daed4e795ab2941629cb9fa1beec55b90a"
 dependencies = [
  "proc-macro2",
  "quote",

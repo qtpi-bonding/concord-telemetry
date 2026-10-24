@@ -14,7 +14,7 @@ testing = ["opentelemetry_sdk/testing"]
 
 [dependencies]
 concord-telemetry-derive = { path = "../concord-telemetry-derive", version = "0.1.0" }
-coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "9914ab6f084179dff1170087d34ed6322b83bb5d", features = ["anyhow"] }
+coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "61c2a6daed4e795ab2941629cb9fa1beec55b90a", features = ["anyhow"] }
 anyhow = "1"
 opentelemetry = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
 opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
