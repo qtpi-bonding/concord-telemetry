@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package concord_telemetry.v1;
+
+// Who did something. A display and filter value: nothing in telemetry
+// verifies it, and id is never parsed here.
+message Principal {
+  PrincipalKind kind = 1;
+  string id = 2;
+  // Verifiers that actually ran on this request. Empty means asserted.
+  repeated Verification verified_by = 3;
+  optional string via = 4;
+}
+
+enum PrincipalKind {
+  PRINCIPAL_KIND_UNSPECIFIED = 0;
+  PRINCIPAL_KIND_HUMAN = 1;
+  PRINCIPAL_KIND_AGENT = 2;
+  PRINCIPAL_KIND_DAEMON = 3;
+}
+
+enum Verification {
+  VERIFICATION_UNSPECIFIED = 0;
+  VERIFICATION_GRPC_CALLER_AUTH = 1;
+  VERIFICATION_DELIVERY_ATTESTATION = 2;
+  VERIFICATION_DELEGATION_CERT = 3;
+  VERIFICATION_OWNER_DOCUMENT = 4;
+  VERIFICATION_DAEMON_SESSION_CERT = 5;
+}

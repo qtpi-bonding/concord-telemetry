@@ -1,0 +1,16 @@
+[package]
+name = "concord-lint"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "concord-lint"
+path = "src/main.rs"
+
+[dependencies]
+syn = { version = "2", features = ["full", "visit", "parsing", "extra-traits"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }

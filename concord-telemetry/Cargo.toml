@@ -1,0 +1,37 @@
+[package]
+name = "concord-telemetry"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "One init, domain events and coded error records on OpenTelemetry"
+
+[features]
+default = ["reqwest-blocking-client"]
+reqwest-blocking-client = ["opentelemetry-otlp/reqwest-blocking-client"]
+tls = ["reqwest-blocking-client", "opentelemetry-otlp/reqwest-rustls"]
+testing = ["opentelemetry_sdk/testing"]
+
+[dependencies]
+concord-telemetry-derive = { path = "../concord-telemetry-derive", version = "0.1.0" }
+coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "9914ab6f084179dff1170087d34ed6322b83bb5d", features = ["anyhow"] }
+anyhow = "1"
+opentelemetry = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
+opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
+opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["http-proto", "logs", "trace"] }
+opentelemetry-appender-tracing = { version = "=0.33.1" }
+tracing-opentelemetry = { version = "=0.34.0", default-features = false }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
+prost = "0.13"
+prost-types = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+trybuild = "1"
+pbjson-types = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+opentelemetry-proto = { version = "=0.33.1", default-features = false, features = ["gen-tonic-messages", "logs", "trace"] }
+prost14 = { package = "prost", version = "0.14" }
