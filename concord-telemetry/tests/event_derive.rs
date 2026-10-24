@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[path = "proto/fixtures.rs"]
 mod fixtures;
 

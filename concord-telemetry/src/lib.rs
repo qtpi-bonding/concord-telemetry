@@ -5,6 +5,9 @@ mod init;
 mod panic;
 mod principal;
 
+#[cfg(feature = "testing")]
+pub mod testing;
+
 pub mod proto {
     pub use crate::principal::v1;
 }
