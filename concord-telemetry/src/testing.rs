@@ -1,6 +1,5 @@
 use crate::{AttrValue, Attrs, Event, EVENT_TARGET};
 use opentelemetry::logs::AnyValue;
-use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -174,11 +173,14 @@ impl Capture {
     }
 
     #[doc(hidden)]
-    pub fn trace_id_for(&self, event_name: &'static str) -> Option<TraceId> {
+    pub fn trace_id_for(&self, event_name: &'static str) -> Option<[u8; 16]> {
         self.records()
             .into_iter()
             .find(|log| log.event_name() == Some(event_name))
-            .and_then(|log| log.trace_context().map(|context| context.trace_id))
+            .and_then(|log| {
+                log.trace_context()
+                    .map(|context| context.trace_id.to_bytes())
+            })
     }
 }
 

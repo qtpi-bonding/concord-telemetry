@@ -242,5 +242,5 @@ fn log_records_have_the_current_span_trace_id() {
     let actual_trace_id = captured
         .trace_id_for("trace-capture")
         .expect("captured log should have trace context");
-    assert_eq!(actual_trace_id, expected_trace_id);
+    assert_eq!(actual_trace_id, expected_trace_id.to_bytes());
 }
