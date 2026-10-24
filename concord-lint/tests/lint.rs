@@ -395,3 +395,17 @@ fn baseline_with_blank_lines_is_accepted() {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn events_with_only_fields_have_no_message_to_check() {
+    let rules = scan(
+        "src/lib.rs",
+        "fn f() { tracing::event!(name: \"x\", target: \"t\", tracing::Level::INFO, action_id = 1); }",
+    );
+    assert!(rules.is_empty(), "{rules:?}");
+    let rules = scan(
+        "src/lib.rs",
+        "fn f() { tracing::event!(tracing::Level::INFO, action_id = 1,); }",
+    );
+    assert!(rules.is_empty(), "{rules:?}");
+}

@@ -292,7 +292,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             if family == "tracing" && (name == "span" || name.ends_with("_span")) {
                 return;
             }
-            inspect_macro(self, mac, &family, &name);
+            inspect_macro(self, mac, &family);
         } else {
             recurse_unknown_macro(self, mac);
         }
@@ -312,7 +312,7 @@ impl Scanner<'_> {
     }
 }
 
-fn inspect_macro(scanner: &mut Scanner<'_>, mac: &Macro, family: &str, name: &str) {
+fn inspect_macro(scanner: &mut Scanner<'_>, mac: &Macro, family: &str) {
     let segments = split_top_level(&mac.tokens);
     let mut start = 0;
     if family == "concord" {
@@ -342,10 +342,6 @@ fn inspect_macro(scanner: &mut Scanner<'_>, mac: &Macro, family: &str, name: &st
             }
         }
     }
-    if family == "tracing" && message.is_none() && !segments.is_empty() {
-        scanner.add(mac, "message-has-values", "message is not a string literal");
-    }
-    let _ = name;
 }
 
 fn split_top_level(tokens: &TokenStream) -> Vec<TokenStream> {
@@ -444,7 +440,7 @@ fn recurse_unknown_macro(scanner: &mut Scanner<'_>, mac: &Macro) {
     collect_nested_macros(mac.tokens.clone(), &mut nested);
     for nested_macro in &nested {
         match scanner.macro_family(&nested_macro.path) {
-            Some((family, name)) => inspect_macro(scanner, nested_macro, &family, &name),
+            Some((family, _)) => inspect_macro(scanner, nested_macro, &family),
             None => recurse_unknown_macro(scanner, nested_macro),
         }
     }
