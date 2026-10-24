@@ -18,11 +18,10 @@ macro_rules! error_anyhow {
         let facts = $crate::__private::coded_error::facts_anyhow($err);
         $crate::__emit_error!(facts, $source $(, $($fields)*)?)
     }};
-    // No `source = ...`: the error's own code is the source label, so the fingerprint is
-    // stable per code (unlike `error!`, whose default is the calling module path).
+    // No `source = ...`: the calling module path, as `error!` does.
     ($err:expr $(, $($fields:tt)*)?) => {{
         let facts = $crate::__private::coded_error::facts_anyhow($err);
-        $crate::__emit_error!(facts, facts.code $(, $($fields)*)?)
+        $crate::__emit_error!(facts, ::core::module_path!() $(, $($fields)*)?)
     }};
 }
 

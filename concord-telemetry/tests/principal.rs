@@ -98,5 +98,5 @@ fn rust_verification_matches_proto_file() {
         assert_eq!(v as i32, num.parse::<i32>().unwrap(), "{name}");
         n += 1;
     }
-    assert_eq!(n, 8);
+    assert_eq!(n, 1 + Verification::RootSignature as usize);
 }

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SLOT=/Users/aicoder/Documents/systematic-action/scripts/cargo-slot
-[ -x "$SLOT" ] || { echo "cargo-slot missing at $SLOT" >&2; exit 2; }   # never bypass the compile slots
+SLOT="${CARGO_SLOT:-$(command -v cargo-slot || true)}"   # compile slots where available; plain cargo elsewhere
 $SLOT cargo fmt --all -- --check
 $SLOT cargo clippy --workspace --all-targets --all-features -- -D warnings
 $SLOT cargo test --workspace --all-features

@@ -7,8 +7,10 @@ it. Consumers depend on `concord-telemetry` and `tracing`, never on an
 
 Workspace: `concord-telemetry` (library), `concord-telemetry-derive`
 (`#[derive(Event)]`, re-exported), `concord-lint` (checker binary). The shared
-field registry is `fields.toml`; `proto/concord_telemetry/v1/principal.proto`
-is the `Principal` message (hand-written prost types, no build step).
+field registry is `fields.toml`; `concord-telemetry-proto/proto/concord_telemetry/v1/principal.proto`
+is the `Principal` message (hand-written prost types in `concord-telemetry`; the
+tiny `concord-telemetry-proto` crate exposes the proto's include path to
+consumers' `build.rs`, see "Importing `principal.proto`" below).
 
 ## Init
 
@@ -93,7 +95,7 @@ string), `.via`; its serde JSON uses `verifiedBy` (pbjson-compatible).
 ## Error records
 
 `concord_telemetry::error!(&err, rpc.method = %m)` and
-`error_anyhow!(&err, source = X::NAME)` (without `source`, the error code is the source label) record `error.code`, `error.class`,
+`error_anyhow!(&err, source = X::NAME)` (without `source`, the source is the calling module path, as with `error!`) record `error.code`, `error.class`,
 `error.fingerprint`, `error.source` and your fields, never the error's Display
 text. A panic is recorded as `concord.process.panic` (class unknown, source the
 panic location).

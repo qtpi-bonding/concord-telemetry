@@ -5,8 +5,8 @@
 # ALLOWED_CRATE is a crate that may legitimately depend on opentelemetry directly,
 # normally just `concord-telemetry` (the OpenTelemetry family below is always
 # allowed). `-p PACKAGE` limits the tree to one workspace member; the default is the
-# whole workspace in the current directory. Set CARGO_SLOT to a wrapper that
-# serializes compiles (cargo-slot); unset, cargo runs directly.
+# whole workspace in the current directory. Cargo runs through $CARGO_SLOT
+# if set, else `cargo-slot` on PATH if present, else directly.
 set -euo pipefail
 
 pkg=()
@@ -18,11 +18,7 @@ else
 fi
 [ $# -ge 1 ] || { echo "usage: $0 [-p PACKAGE] ALLOWED_CRATE..." >&2; exit 2; }
 
-SLOT="${CARGO_SLOT-}"
-if [ -z "$SLOT" ]; then
-  default=/Users/aicoder/Documents/systematic-action/scripts/cargo-slot
-  if [ -x "$default" ]; then SLOT="$default"; fi
-fi
+SLOT="${CARGO_SLOT-$(command -v cargo-slot || true)}"
 
 # An explicit compare, not a grep.
 deps="$($SLOT cargo tree "${pkg[@]}" -e normal -i opentelemetry --depth 1 --prefix none | awk '{print $1}' | sort -u)"

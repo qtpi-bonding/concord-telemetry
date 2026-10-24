@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var("PROTOC", protoc_bin_vendored::protoc_bin_path()?);
+    let protoc = protoc_bin_vendored::protoc_bin_path()?;
     let out = PathBuf::from(std::env::var("OUT_DIR")?);
     let descriptor = out.join("descriptor.bin");
     let includes = [
@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     prost_build::Config::new()
+        .protoc_executable(&protoc)
         .file_descriptor_set_path(&descriptor)
         .extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")
         .compile_protos(&["proto/consumer/v1/events.proto"], &includes)?;

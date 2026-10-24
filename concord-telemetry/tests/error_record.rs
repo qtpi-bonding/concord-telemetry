@@ -119,7 +119,7 @@ fn records_facts_without_display_text() {
 }
 
 #[test]
-fn error_anyhow_without_source_uses_the_code() {
+fn error_anyhow_without_source_uses_the_module_path() {
     let records = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Capture(records.clone()));
     tracing::subscriber::with_default(subscriber, || {
@@ -132,7 +132,7 @@ fn error_anyhow_without_source_uses_the_code() {
         |r: &Recorded, name: &str| r.fields.iter().find(|(f, _)| f == name).unwrap().1.clone();
     assert_eq!(
         get(&records[0], "error.source"),
-        "\"test.action.not_found\""
+        format!("\"{}\"", module_path!())
     );
     assert_eq!(get(&records[0], "rpc.method"), "\"GetAction\"");
     assert_eq!(
@@ -142,10 +142,13 @@ fn error_anyhow_without_source_uses_the_code() {
             coded_error::fingerprint(
                 "test.action.not_found",
                 coded_error::ErrorClass::Logical,
-                "test.action.not_found"
+                module_path!()
             )
         )
     );
     assert_eq!(get(&records[1], "error.code"), "\"unknown\"");
-    assert_eq!(get(&records[1], "error.source"), "\"unknown\"");
+    assert_eq!(
+        get(&records[1], "error.source"),
+        format!("\"{}\"", module_path!())
+    );
 }
