@@ -1,4 +1,4 @@
-error: field `payload` uses a forbidden protobuf field kind
+error: bytes/map/oneof content stays in the source record
  --> tests/ui/bytes_field.rs:8:5
   |
 8 | /     #[prost(bytes, tag = "2")]

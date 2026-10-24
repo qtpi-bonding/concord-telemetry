@@ -73,6 +73,16 @@ pub struct Scalars {
     pub enabled: bool,
     #[prost(enumeration = "Status", optional, tag = "8")]
     pub status: Option<i32>,
+    #[prost(uint64, optional, tag = "9")]
+    pub maybe_big: Option<u64>,
+    #[prost(uint32, optional, tag = "10")]
+    pub maybe_count: Option<u32>,
+    #[prost(string, optional, tag = "11")]
+    pub maybe_text: Option<String>,
+    #[prost(enumeration = "Status", repeated, tag = "12")]
+    pub statuses: Vec<i32>,
+    #[prost(uint64, repeated, tag = "13")]
+    pub big_values: Vec<u64>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message, Event)]
@@ -82,11 +92,20 @@ pub struct PbjsonStamped {
     pub source_record_id: String,
     #[prost(message, optional, tag = "2")]
     pub at: Option<::pbjson_types::Timestamp>,
+    #[prost(message, optional, tag = "3")]
+    pub took: Option<::pbjson_types::Duration>,
 }
 
 pub mod identity_crypto {
     #[derive(Clone, Copy, PartialEq, ::prost::Message)]
     pub struct Timestamp {
+        #[prost(int64, tag = "1")]
+        pub seconds: i64,
+        #[prost(int32, tag = "2")]
+        pub nanos: i32,
+    }
+    #[derive(Clone, Copy, PartialEq, ::prost::Message)]
+    pub struct Duration {
         #[prost(int64, tag = "1")]
         pub seconds: i64,
         #[prost(int32, tag = "2")]
@@ -101,4 +120,6 @@ pub struct IdentityStamped {
     pub source_record_id: String,
     #[prost(message, optional, tag = "2")]
     pub at: Option<identity_crypto::Timestamp>,
+    #[prost(message, optional, tag = "3")]
+    pub took: Option<identity_crypto::Duration>,
 }

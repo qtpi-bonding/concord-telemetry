@@ -94,8 +94,19 @@ pub fn capture() -> Capture {
     }
 }
 
+/// A reader for the shared exporter that installs no subscriber. Use it with
+/// `layer()` in test binaries that install their own subscriber, where
+/// `capture()` would panic.
+pub fn reader() -> Capture {
+    Capture {
+        exporter: provider_exporter(),
+    }
+}
+
 pub fn capture_exclusive() -> ExclusiveCapture {
-    let guard = EXCLUSIVE.lock().expect("capture mutex poisoned");
+    let guard = EXCLUSIVE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let capture = capture();
     capture.clear();
     ExclusiveCapture {

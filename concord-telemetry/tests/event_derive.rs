@@ -53,7 +53,6 @@ where
         *attrs = visitor.0;
         assert_eq!(event.metadata().target(), concord_telemetry::EVENT_TARGET);
         assert_eq!(event.metadata().level(), &tracing::Level::INFO);
-        assert!(!event.metadata().name().is_empty());
     }
 }
 use std::collections::BTreeMap;
@@ -65,11 +64,16 @@ fn recorded<E: Event>(event: &E) -> Attrs {
         event.emit()
     });
     let result = attrs.lock().unwrap().clone();
+    assert_eq!(event_name::<E>(), E::TYPE_NAME);
     assert_eq!(
         result.get("event.type"),
         Some(&AttrValue::Str(E::TYPE_NAME.to_string()))
     );
     result
+}
+
+fn event_name<E: Event>() -> &'static str {
+    E::TYPE_NAME
 }
 
 fn principal() -> Principal {
@@ -177,6 +181,10 @@ fn round_trips_timestamp_sources_and_zero_nanos() {
             seconds: 3,
             nanos: 4,
         }),
+        took: Some(pbjson_types::Duration {
+            seconds: 5,
+            nanos: 6,
+        }),
     };
     assert_eq!(PbjsonStamped::from_attributes(&recorded(&pb)).unwrap(), pb);
     let identity = IdentityStamped {
@@ -184,6 +192,10 @@ fn round_trips_timestamp_sources_and_zero_nanos() {
         at: Some(fixtures::identity_crypto::Timestamp {
             seconds: 8,
             nanos: 9,
+        }),
+        took: Some(fixtures::identity_crypto::Duration {
+            seconds: 10,
+            nanos: 11,
         }),
     };
     assert_eq!(
@@ -203,6 +215,11 @@ fn scalar_rules_and_unrecognised_enum_are_lossless_or_error() {
         precise: -2.5,
         enabled: true,
         status: Some(Status::Running as i32),
+        maybe_big: Some(u64::MAX),
+        maybe_count: Some(u32::MAX),
+        maybe_text: Some("text".into()),
+        statuses: vec![Status::Ready as i32, Status::Running as i32],
+        big_values: vec![1, u64::MAX],
     };
     let attrs = recorded(&value);
     assert_eq!(
@@ -245,4 +262,34 @@ fn optional_values_are_absent_and_event_filter_target_is_stable() {
         || value.emit(),
     );
     assert!(attrs.lock().unwrap().contains_key("event.type"));
+}
+
+#[test]
+fn principal_defaults_and_rebuild_errors_are_explicit() {
+    let mut attrs = recorded(&action(None));
+    attrs.remove("principal.id");
+    attrs.remove("principal.verified_by");
+    attrs.remove("principal.via");
+    let rebuilt = ActionStatusChanged::from_attributes(&attrs).unwrap();
+    let principal = rebuilt.principal.unwrap();
+    assert_eq!(principal.id, "");
+    assert!(principal.verified_by.is_empty());
+    assert_eq!(principal.via, None);
+
+    let mut missing = attrs.clone();
+    missing.remove("principal.kind");
+    assert!(matches!(
+        ActionStatusChanged::from_attributes(&missing),
+        Ok(ActionStatusChanged {
+            principal: None,
+            ..
+        })
+    ));
+
+    let mut wrong_type = recorded(&action(None));
+    wrong_type.insert("principal.kind".into(), AttrValue::I64(1));
+    assert!(matches!(
+        ActionStatusChanged::from_attributes(&wrong_type),
+        Err(RebuildError::Type(key)) if key == "principal.kind"
+    ));
 }

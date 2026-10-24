@@ -142,6 +142,11 @@ fn scalar_attributes_round_trip_through_otel() {
         precise: -9.5,
         enabled: true,
         status: Some(99),
+        maybe_big: None,
+        maybe_count: None,
+        maybe_text: None,
+        statuses: Vec::new(),
+        big_values: Vec::new(),
     };
     let minimum_id = id();
     let minimum = Scalars {
@@ -153,6 +158,11 @@ fn scalar_attributes_round_trip_through_otel() {
         precise: -9.5,
         enabled: true,
         status: Some(Status::Ready as i32),
+        maybe_big: None,
+        maybe_count: None,
+        maybe_text: None,
+        statuses: Vec::new(),
+        big_values: Vec::new(),
     };
     let maximum_id = id();
     let maximum = Scalars {
@@ -164,6 +174,11 @@ fn scalar_attributes_round_trip_through_otel() {
         precise: -9.5,
         enabled: true,
         status: Some(Status::Ready as i32),
+        maybe_big: None,
+        maybe_count: None,
+        maybe_text: None,
+        statuses: Vec::new(),
+        big_values: Vec::new(),
     };
     minimum.emit();
     maximum.emit();
@@ -200,6 +215,8 @@ fn scalar_attributes_round_trip_through_otel() {
         "status".to_owned(),
         AttrValue::Str("NOT_A_STATUS".to_owned()),
     );
+    invalid_attrs.insert("statuses".to_owned(), AttrValue::Str("[]".to_owned()));
+    invalid_attrs.insert("big_values".to_owned(), AttrValue::Str("[]".to_owned()));
     assert!(matches!(
         Scalars::from_attributes(&invalid_attrs),
         Err(RebuildError::Parse(_))
