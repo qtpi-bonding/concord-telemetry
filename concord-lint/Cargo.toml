@@ -12,5 +12,6 @@ path = "src/main.rs"
 [dependencies]
 syn = { version = "2", features = ["full", "visit", "parsing", "extra-traits"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
