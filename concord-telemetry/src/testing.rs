@@ -67,7 +67,7 @@ fn install() -> &'static InMemoryLogExporter {
             tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("capture"));
         let bridge =
             opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider())
-                .with_filter(target_filter::<tracing_subscriber::Registry>());
+                .with_filter(target_filter());
         let subscriber = tracing_subscriber::registry().with(span_layer).with(bridge);
         tracing::subscriber::set_global_default(subscriber).unwrap_or_else(|_| {
             panic!("testing capture could not install its subscriber; use testing::layer()")
@@ -81,10 +81,7 @@ fn provider_exporter() -> &'static InMemoryLogExporter {
     INSTALL.get().expect("testing exporter was not initialized")
 }
 
-fn target_filter<S>() -> Targets
-where
-    S: tracing::Subscriber,
-{
+fn target_filter() -> Targets {
     Targets::new().with_target(EVENT_TARGET, tracing::Level::TRACE)
 }
 
@@ -120,7 +117,7 @@ where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
     opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider())
-        .with_filter(target_filter::<S>())
+        .with_filter(target_filter())
 }
 
 impl Capture {

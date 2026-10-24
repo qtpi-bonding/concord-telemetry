@@ -202,3 +202,196 @@ fn clean_fixture_has_no_violations() {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn equals_inside_a_string_message_is_not_a_field() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f() { info!(\"retry=3\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f() { info!(\"a == b\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn sigil_fields_are_checked_against_the_registry() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f(widget: u8) { info!(%widget, \"x\"); }",
+    );
+    assert_eq!(rules, vec!["unregistered-field"]);
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f(widget: u8) { info!(?widget, \"x\"); }",
+    );
+    assert_eq!(rules, vec!["unregistered-field"]);
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; struct S { id: u8 } impl S { fn f(&self) { info!(%self.id, \"x\"); } }",
+    );
+    assert_eq!(rules, vec!["unregistered-field"]);
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::warn; fn f(error: u8) { warn!(%error, \"failed\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn registry_rule_is_skipped_inside_test_fns() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; #[tokio::test] async fn t() { info!(widget = 1, \"x\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn macros_inside_unknown_macro_bodies_are_checked_once() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f(x: u8) { let _ = vec![{ info!(\"bad {x}\"); 1 }]; }",
+    );
+    assert_eq!(rules, vec!["message-has-values"]);
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f(x: u8) -> bool { matches!(x, _ if { info!(\"bad {x}\"); true }) }",
+    );
+    assert_eq!(rules, vec!["message-has-values"]);
+}
+
+#[test]
+fn tracing_enabled_macro_is_not_a_log_call() {
+    let rules = scan(
+        "src/lib.rs",
+        "fn f() { let _ = tracing::enabled!(tracing::Level::INFO); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn only_tracing_macros_are_checked_by_name() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing_error::error; fn f(x: u8) { error!(\"bad {x}\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+
+    // Imports count even when they come after the macro use.
+    let rules = scan(
+        "src/lib.rs",
+        "fn f(x: u8) { info!(\"bad {x}\"); } use tracing::info;",
+    );
+    assert_eq!(rules, vec!["message-has-values"]);
+}
+
+#[test]
+fn fully_qualified_event_macro_is_checked() {
+    let rules = scan(
+        "src/lib.rs",
+        "fn f() { tracing::event!(tracing::Level::INFO, widget = 1, \"x\"); }",
+    );
+    assert_eq!(rules, vec!["unregistered-field"]);
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::Level; fn f() { tracing::event!(Level::INFO, action_id = 1, \"x\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn comparison_operator_does_not_split_fields() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f(a: u8, b: u8) { info!(count = if a < b { 1 } else { 2 }, action_id = 3, \"x\"); }",
+    );
+    assert_eq!(rules, vec!["unregistered-field"]);
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f(a: u8, b: u8, x: u8) { info!(context = if a < b { 1 } else { 2 }, \"bad {x}\"); }",
+    );
+    assert_eq!(rules, vec!["message-has-values"]);
+}
+
+#[test]
+fn doubled_braces_are_literal_not_interpolation() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f(y: u8) { info!(\"{{x}} {y}\"); }",
+    );
+    assert_eq!(rules, vec!["message-has-values"]);
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f() { info!(\"{{x}}\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn raw_string_messages_are_fixed_messages() {
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f() { info!(r\"plain\"); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f() { info!(r#\"plain\"#); }",
+    );
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn process_exit_is_only_flagged_in_binaries() {
+    let source = "fn main() { std::process::exit(1); }";
+    let rules = scan("src/bin/tool.rs", source);
+    assert_eq!(rules, vec!["process-exit"]);
+
+    let rules = scan("src/lib.rs", source);
+    assert_eq!(rules, Vec::<String>::new());
+}
+
+#[test]
+fn nonexistent_path_exits_with_usage_error() {
+    let output = binary()
+        .arg("/definitely/not/here")
+        .output()
+        .expect("lint runs");
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn baseline_with_blank_lines_is_accepted() {
+    let dir = std::env::temp_dir().join(format!("concord-lint-blank-{}", std::process::id()));
+    fs::create_dir_all(&dir).expect("temp dir");
+    let source = dir.join("clean.rs");
+    let baseline = dir.join("lint-baseline.txt");
+    fs::write(&source, "fn f() {}\n").expect("write clean source");
+    fs::write(
+        &baseline,
+        "1\tsrc/a.rs: message-has-values: message contains values\n\n1\tsrc/b.rs: process-exit: process::exit\n\n",
+    )
+    .expect("write baseline with blank lines");
+
+    let output = binary()
+        .args(["--baseline", baseline.to_str().expect("path is utf8")])
+        .arg(&source)
+        .output()
+        .expect("baseline read runs");
+    fs::remove_dir_all(&dir).expect("remove temp dir");
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+}

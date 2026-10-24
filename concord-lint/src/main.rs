@@ -80,6 +80,9 @@ fn run(args: Vec<String>) -> Result<u8, String> {
 }
 
 fn collect(path: &Path, registry: &Registry, output: &mut Vec<Violation>) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!("no such path: {}", path.display()));
+    }
     if path.is_dir() {
         if path.file_name().is_some_and(|name| name == "target") {
             return Ok(());

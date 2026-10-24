@@ -222,7 +222,7 @@ fn expand(input: &DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
         if matches!(kind, Kind::Bytes | Kind::Map | Kind::Oneof) {
             return Err(Error::new_spanned(
                 field,
-                format!("bytes/map/oneof content stays in the source record"),
+                "bytes/map/oneof content stays in the source record",
             ));
         }
         let ty = &field.ty;
@@ -239,13 +239,16 @@ fn expand(input: &DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
                 "repeated Timestamp/Duration fields are not supported",
             ));
         }
-        if kind == Kind::Message
+        let is_nested_message = kind == Kind::Message
             && !is_timestamp(&base_ty, "Timestamp")
-            && !is_timestamp(&base_ty, "Duration")
-        {
-            if !(optional && is_principal(&base_ty)) {
-                return Err(Error::new_spanned(field, format!("field `{fname}` is a nested message; only Principal, Timestamp, and Duration are supported")));
-            }
+            && !is_timestamp(&base_ty, "Duration");
+        if is_nested_message && !(optional && is_principal(&base_ty)) {
+            return Err(Error::new_spanned(
+                field,
+                format!(
+                    "field `{fname}` is a nested message; only Principal, Timestamp, and Duration are supported"
+                ),
+            ));
         }
         let is_principal = kind == Kind::Message && optional && is_principal(&base_ty);
         if is_principal {

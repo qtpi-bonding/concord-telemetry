@@ -7,13 +7,16 @@ use crate::scan::Violation;
 pub fn read(path: &Path) -> Result<BTreeMap<String, usize>, String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut result = BTreeMap::new();
-    for line in text.lines() {
+    for (line_number, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
         let (count, key) = line
             .split_once('\t')
-            .ok_or_else(|| "invalid baseline line".to_string())?;
+            .ok_or_else(|| format!("invalid baseline line {}", line_number + 1))?;
         let count: usize = count
             .parse()
-            .map_err(|_| "invalid baseline count".to_string())?;
+            .map_err(|_| format!("invalid baseline count on line {}", line_number + 1))?;
         result.insert(key.to_string(), count);
     }
     Ok(result)

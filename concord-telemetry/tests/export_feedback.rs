@@ -44,13 +44,11 @@ fn exporter_does_not_export_its_own_feedback() {
     let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = count.clone();
     thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(stream) = stream {
-                let mut response_stream = stream.try_clone().expect("clone request stream");
-                let _ = drain_request(stream);
-                observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let _ = response_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-            }
+        for stream in listener.incoming().flatten() {
+            let mut response_stream = stream.try_clone().expect("clone request stream");
+            let _ = drain_request(stream);
+            observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let _ = response_stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         }
     });
     std::env::set_var("RUST_LOG", "trace");
