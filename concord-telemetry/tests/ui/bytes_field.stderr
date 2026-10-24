@@ -1,0 +1,6 @@
+error: field `payload` uses a forbidden protobuf field kind
+ --> tests/ui/bytes_field.rs:8:5
+  |
+8 | /     #[prost(bytes, tag = "2")]
+9 | |     payload: Vec<u8>,
+  | |____________________^

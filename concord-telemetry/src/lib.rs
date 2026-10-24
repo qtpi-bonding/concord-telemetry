@@ -1,5 +1,6 @@
 mod deadline;
 mod error;
+mod event;
 mod init;
 mod panic;
 mod principal;
@@ -8,6 +9,8 @@ pub mod proto {
     pub use crate::principal::v1;
 }
 
+pub use concord_telemetry_derive::Event;
+pub use event::{AttrValue, Attrs, Event, RebuildError};
 pub use init::{init, Config, Guard, InitError, LocalOutput, EVENT_TARGET};
 pub use panic::PANIC_CODE;
 pub use principal::{Principal, PrincipalKind, Verification};

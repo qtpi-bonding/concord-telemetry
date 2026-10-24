@@ -1,0 +1,6 @@
+error: field `choice` uses a forbidden protobuf field kind
+ --> tests/ui/oneof_field.rs:8:5
+  |
+8 | /     #[prost(oneof = "choice", tags = "2, 3")]
+9 | |     choice: Option<Choice>,
+  | |__________________________^

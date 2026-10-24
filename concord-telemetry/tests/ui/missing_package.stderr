@@ -1,0 +1,8 @@
+error: Event requires #[concord_event(package = "...")]
+ --> tests/ui/missing_package.rs:4:1
+  |
+4 | / struct MissingPackage {
+5 | |     #[prost(string, tag = "1")]
+6 | |     source_record_id: String,
+7 | | }
+  | |_^

@@ -1,0 +1,6 @@
+error: field `other` is a nested message; only Principal, Timestamp, and Duration are supported
+ --> tests/ui/nested_message.rs:8:5
+  |
+8 | /     #[prost(message, optional, tag = "2")]
+9 | |     other: Option<OtherMessage>,
+  | |_______________________________^

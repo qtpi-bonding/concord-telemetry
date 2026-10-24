@@ -1,0 +1,27 @@
+# Shared field-name registry. Adding a name is a one-line PR.
+# type: str | int | bool | float | duration | timestamp
+[fields]
+action_id = { type = "str", meaning = "grorg Action id" }
+session_id = { type = "str", meaning = "grorg Session id" }
+elapsed_ms = { type = "int", meaning = "Elapsed wall time in milliseconds" }
+agent_id = { type = "str", meaning = "Agent principal id (opaque string)" }
+delivery_id = { type = "str", meaning = "multimatrix delivery id; stable across resends" }
+room_id = { type = "str", meaning = "multimatrix room id" }
+message_id = { type = "str", meaning = "Room message id" }
+machine_id = { type = "str", meaning = "Machine id" }
+offline_machine_id = { type = "str", meaning = "Machine id that went offline" }
+batch_sequence = { type = "int", meaning = "Mailbox batch sequence number" }
+context = { type = "str", meaning = "Short fixed label for where a log comes from" }
+node_id = { type = "str", meaning = "archegraph DAG node id" }
+build_id = { type = "str", meaning = "archegraph build id" }
+blueprint_name = { type = "str", meaning = "archegraph Blueprint name" }
+instance_id = { type = "str", meaning = "Instance id" }
+label = { type = "str", meaning = "Short fixed label" }
+error = { type = "str", meaning = "Display of an error, local debug logs only (rule 5)" }
+source_record_id = { type = "str", meaning = "Id of the record an event describes" }
+"error.type" = { type = "str", meaning = "OTel semconv: error type" }
+"rpc.method" = { type = "str", meaning = "OTel semconv: RPC method" }
+"http.request.method" = { type = "str", meaning = "OTel semconv: HTTP method" }
+
+[never]
+names = ["content", "body", "stdout", "stderr", "prompt", "env", "password", "token", "secret"]

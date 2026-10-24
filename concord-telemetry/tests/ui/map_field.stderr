@@ -1,0 +1,6 @@
+error: field `values` uses a forbidden protobuf field kind
+  --> tests/ui/map_field.rs:9:5
+   |
+ 9 | /     #[prost(map = "string, string", tag = "2")]
+10 | |     values: HashMap<String, String>,
+   | |___________________________________^

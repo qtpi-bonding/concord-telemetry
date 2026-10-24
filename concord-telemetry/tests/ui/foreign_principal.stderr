@@ -1,0 +1,6 @@
+error: field `principal` is a nested message; only Principal, Timestamp, and Duration are supported
+  --> tests/ui/foreign_principal.rs:16:5
+   |
+16 | /     #[prost(message, optional, tag = "2")]
+17 | |     principal: Option<foreign::Principal>,
+   | |_________________________________________^

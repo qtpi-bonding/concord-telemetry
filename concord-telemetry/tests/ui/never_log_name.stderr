@@ -1,0 +1,6 @@
+error: field `stdout` is forbidden by the never-log rule
+ --> tests/ui/never_log_name.rs:8:5
+  |
+8 | /     #[prost(string, tag = "2")]
+9 | |     stdout: String,
+  | |__________________^
