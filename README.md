@@ -1,8 +1,10 @@
 # concord-telemetry
 
-One `init`, domain events and coded error records on OpenTelemetry. Binaries
-only: library, language-agnostic and wasm/Flutter-native crates never depend on
-it. Consumers depend on `concord-telemetry` and `tracing`, never on an
+One `init`, domain events and coded error records on OpenTelemetry. A repo's
+binaries and its own internal crates (e.g. grorg's `ops`, which emits domain
+events after the write) may depend on it. Crates other repos depend on (proto
+and type crates), language-agnostic crates and wasm/Flutter-native crates never
+do. Consumers depend on `concord-telemetry` and `tracing`, never on an
 `opentelemetry*` crate directly.
 
 Workspace: `concord-telemetry` (library), `concord-telemetry-derive`
