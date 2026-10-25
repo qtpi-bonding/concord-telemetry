@@ -107,6 +107,27 @@ string), `.via`; its serde JSON uses `verifiedBy` (pbjson-compatible).
 text. A panic is recorded as `concord.process.panic` (class unknown, source the
 panic location).
 
+## Trace context
+
+One request keeps one trace id across processes (W3C `traceparent`). With the
+`grpc` feature, which adds tower layers over `http::Request` and no tonic:
+
+```rust
+Server::builder().layer(concord_telemetry::grpc::ServerLayer) // joins the caller's trace
+FooClient::new(concord_telemetry::grpc::client(channel))       // sends it
+```
+
+The server span covers a handler up to its response. Items of a streaming
+response are produced outside it and carry no trace id. For other carriers,
+such as NATS headers, `concord_telemetry::propagation` has `inject`,
+`set_parent` and `traceparent`. Hooks and CLIs pass `TRACEPARENT`
+(`set_parent_from_env`); `tracestate` is not carried that way. Without an
+exporter there are no trace ids and nothing is sent. The `grpc.server` and
+`grpc.client` spans are still created, and stay enabled whatever `RUST_LOG`
+says, including a directive naming `concord_telemetry::grpc` itself. A server
+joins any valid `traceparent` it receives, so an untrusted caller chooses the
+trace id and the sampled flag of its own requests.
+
 ## Testing
 
 Enable the `testing` feature in dev-dependencies. `testing::capture()` installs

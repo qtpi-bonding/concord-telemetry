@@ -8,9 +8,9 @@ $SLOT cargo test --workspace --all-features
 $SLOT cargo check -p concord-telemetry --no-default-features
 # Consumers must never see opentelemetry directly (explicit depth-1 allowlist; shared with consumers).
 CARGO_SLOT="$SLOT" scripts/check-otel-dependents.sh -p concord-telemetry concord-telemetry
-# No tonic in this crate's tree. `cargo tree -i tonic` exits non-zero when the package is absent (the pass case),
+# No tonic in this crate's tree, grpc feature included. `cargo tree -i tonic` exits non-zero when the package is absent (the pass case),
 # and an `if` (not a `!` pipeline) is what lets `set -e` see a failure.
-if $SLOT cargo tree -p concord-telemetry -e normal -i tonic >/dev/null 2>&1; then
+if $SLOT cargo tree -p concord-telemetry --features grpc -e normal -i tonic >/dev/null 2>&1; then
   echo "tonic is in concord-telemetry's tree" >&2; exit 1
 fi
 # No TLS stack in the default build (plain HTTP; TLS only behind the `tls` feature).

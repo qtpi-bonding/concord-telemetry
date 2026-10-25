@@ -13,6 +13,8 @@ use tracing_subscriber::{
 };
 
 pub const EVENT_TARGET: &str = "concord_telemetry::event";
+/// Target of the gRPC trace spans (`grpc` feature).
+pub(crate) const GRPC_TARGET: &str = "concord_telemetry::grpc";
 
 pub struct Config {
     pub service_name: &'static str,
@@ -94,9 +96,10 @@ const EXPORTER_TARGETS: [&str; 10] = [
     "opentelemetry_proto",
 ];
 
-/// The one filter for every output: RUST_LOG (default `info`), domain events
-/// and error records always on, and the exporter's own crates off while
-/// exporting.
+/// The one filter for every output: RUST_LOG (default `info`), domain events,
+/// error records and the gRPC trace spans always on, and the exporter's own
+/// crates off while exporting. A disabled gRPC span would silently break the
+/// trace between services.
 ///
 /// It is a global filter, never a per-layer one. tracing-subscriber's
 /// per-layer filtering drops the next event on a thread after an `enabled!`
@@ -105,6 +108,7 @@ const EXPORTER_TARGETS: [&str; 10] = [
 fn filter(exporting: bool) -> EnvFilter {
     let mut filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     filter = filter.add_directive(directive(EVENT_TARGET, LevelFilter::TRACE));
+    filter = filter.add_directive(directive(GRPC_TARGET, LevelFilter::INFO));
     if exporting {
         for target in EXPORTER_TARGETS {
             filter = filter.add_directive(directive(target, LevelFilter::OFF));

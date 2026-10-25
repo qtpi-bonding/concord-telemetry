@@ -10,6 +10,11 @@ fn events_remain_enabled_when_rust_log_is_error() {
     config.local = LocalOutput::JsonFile(file.clone());
     let guard = init(config).expect("init");
     tracing::info!(target: "application", "hidden");
+    let grpc_span = tracing::info_span!(target: "concord_telemetry::grpc", "grpc.server");
+    assert!(
+        !grpc_span.is_disabled(),
+        "gRPC trace spans survive RUST_LOG=error"
+    );
     tracing::event!(name: "visible", target: EVENT_TARGET, tracing::Level::INFO, marker = "yes");
     drop(guard);
     let output = std::fs::read_to_string(&file).expect("json output");

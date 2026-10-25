@@ -158,7 +158,7 @@ dependencies = [
 [[package]]
 name = "coded-error"
 version = "0.2.0"
-source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=61c2a6daed4e795ab2941629cb9fa1beec55b90a#61c2a6daed4e795ab2941629cb9fa1beec55b90a"
+source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=197076449d81a6552d99ae3e54cdf14067bd0151#197076449d81a6552d99ae3e54cdf14067bd0151"
 dependencies = [
  "anyhow",
  "coded-error-derive",
@@ -168,7 +168,7 @@ dependencies = [
 [[package]]
 name = "coded-error-derive"
 version = "0.2.0"
-source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=61c2a6daed4e795ab2941629cb9fa1beec55b90a#61c2a6daed4e795ab2941629cb9fa1beec55b90a"
+source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=197076449d81a6552d99ae3e54cdf14067bd0151#197076449d81a6552d99ae3e54cdf14067bd0151"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -203,6 +203,7 @@ dependencies = [
  "anyhow",
  "coded-error",
  "concord-telemetry-derive",
+ "http",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -216,6 +217,9 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tower",
+ "tower-layer",
+ "tower-service",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

@@ -4,7 +4,10 @@ mod event;
 mod init;
 mod panic;
 mod principal;
+pub mod propagation;
 
+#[cfg(feature = "grpc")]
+pub mod grpc;
 #[cfg(feature = "testing")]
 pub mod testing;
 
