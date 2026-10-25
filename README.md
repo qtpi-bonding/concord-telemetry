@@ -27,7 +27,9 @@ appends `/v1/logs` and `/v1/traces`). Local output goes to stderr (`Text`,
 `Json`) or a file (`JsonFile`), never stdout. Default filter is `info` when
 `RUST_LOG` is unset; events and error records (target
 `concord_telemetry::event`) are always enabled, so they also print locally
-under `RUST_LOG=error`. Do not call `std::process::exit`: it skips the flush
+under `RUST_LOG=error`. While exporting, the exporter's own crates (`hyper`,
+`h2`, `reqwest`, `tower`, `rustls`, `opentelemetry*`) are off in every output,
+local included, so an export never logs itself into the next one. Do not call `std::process::exit`: it skips the flush
 (`concord-lint` flags it in binaries).
 
 Plain HTTP by default with no TLS stack in the tree. HTTPS to the collector is

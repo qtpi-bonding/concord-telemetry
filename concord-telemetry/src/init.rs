@@ -5,7 +5,7 @@ use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider, Resou
 use std::hash::{BuildHasher, Hasher};
 use std::{fs::OpenOptions, io::IsTerminal, path::PathBuf, sync::Mutex, time::Duration};
 use tracing_subscriber::{
-    filter::{FilterExt, LevelFilter, Targets},
+    filter::{Directive, LevelFilter},
     layer::{Layer, SubscriberExt},
     registry::LookupSpan,
     util::SubscriberInitExt,
@@ -77,37 +77,45 @@ impl Drop for Guard {
     }
 }
 
-fn filter<S>() -> impl tracing_subscriber::layer::Filter<S>
-where
-    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
-{
-    let environment = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    environment.or(Targets::new().with_target(EVENT_TARGET, tracing::Level::TRACE))
+/// Crates the exporter itself logs through. Exporting their records would feed
+/// every export back into the next one.
+const EXPORTER_TARGETS: [&str; 11] = [
+    "hyper",
+    "hyper_util",
+    "h2",
+    "reqwest",
+    "rustls",
+    "tower",
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry_otlp",
+    "opentelemetry_http",
+    "opentelemetry_proto",
+];
+
+/// The one filter for every output: RUST_LOG (default `info`), domain events
+/// and error records always on, and the exporter's own crates off while
+/// exporting.
+///
+/// It is a global filter, never a per-layer one. tracing-subscriber's
+/// per-layer filtering drops the next event on a thread after an `enabled!`
+/// check that a per-layer filter refused, and sqlx makes such a check for
+/// every query, so per-layer filters lost most of a service's records.
+fn filter(exporting: bool) -> EnvFilter {
+    let mut filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    filter = filter.add_directive(directive(EVENT_TARGET, LevelFilter::TRACE));
+    if exporting {
+        for target in EXPORTER_TARGETS {
+            filter = filter.add_directive(directive(target, LevelFilter::OFF));
+        }
+    }
+    filter
 }
 
-fn export_filter<S>() -> impl tracing_subscriber::layer::Filter<S>
-where
-    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
-{
-    let denied = [
-        "hyper",
-        "hyper_util",
-        "h2",
-        "reqwest",
-        "rustls",
-        "tower",
-        "opentelemetry",
-        "opentelemetry_sdk",
-        "opentelemetry_otlp",
-        "opentelemetry_http",
-        "opentelemetry_proto",
-    ]
-    .into_iter()
-    .fold(
-        Targets::new().with_default(LevelFilter::TRACE),
-        |targets, name| targets.with_target(name, LevelFilter::OFF),
-    );
-    filter::<S>().and(denied)
+fn directive(target: &str, level: LevelFilter) -> Directive {
+    format!("{target}={level}")
+        .parse()
+        .expect("a target and level always form a directive")
 }
 
 fn resource(config: &Config) -> Resource {
@@ -153,15 +161,13 @@ where
         LocalOutput::Text => Box::new(
             tracing_subscriber::fmt::layer()
                 .with_writer(std::io::stderr)
-                .with_ansi(std::io::stderr().is_terminal())
-                .with_filter(filter::<S>()),
+                .with_ansi(std::io::stderr().is_terminal()),
         ),
         LocalOutput::Json => Box::new(
             tracing_subscriber::fmt::layer()
                 .json()
                 .with_writer(std::io::stderr)
-                .with_ansi(false)
-                .with_filter(filter::<S>()),
+                .with_ansi(false),
         ),
         LocalOutput::JsonFile(path) => {
             let file = OpenOptions::new()
@@ -173,8 +179,7 @@ where
                 tracing_subscriber::fmt::layer()
                     .json()
                     .with_writer(Mutex::new(file))
-                    .with_ansi(false)
-                    .with_filter(filter::<S>()),
+                    .with_ansi(false),
             )
         }
         LocalOutput::Off => return Ok(None),
@@ -186,10 +191,7 @@ fn log_bridge_layer<S>(provider: &SdkLoggerProvider) -> BoxedLayer<S>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
 {
-    Box::new(
-        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider)
-            .with_filter(export_filter::<S>()),
-    )
+    Box::new(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider))
 }
 
 fn span_layer<S>(provider: &SdkTracerProvider) -> BoxedLayer<S>
@@ -197,11 +199,7 @@ where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
 {
     use opentelemetry::trace::TracerProvider;
-    Box::new(
-        tracing_opentelemetry::layer()
-            .with_tracer(provider.tracer("concord-telemetry"))
-            .with_filter(export_filter::<S>()),
-    )
+    Box::new(tracing_opentelemetry::layer().with_tracer(provider.tracer("concord-telemetry")))
 }
 
 pub fn init(config: Config) -> Result<Guard, InitError> {
@@ -239,6 +237,7 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
     let trace_layer = traces.as_ref().map(span_layer);
 
     let subscriber = tracing_subscriber::registry()
+        .with(filter(logs.is_some()))
         .with(trace_layer)
         .with(log_layer)
         .with(local);
@@ -256,31 +255,42 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
 
 #[cfg(all(test, feature = "testing"))]
 mod tests {
-    #[test]
-    fn export_filter_allows_application_and_event_records_only() {
-        use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
-        use tracing_subscriber::layer::{Layer, SubscriberExt};
+    use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
+    use tracing_subscriber::layer::SubscriberExt;
 
+    /// Runs `body` under the exporting filter with an in-memory log exporter
+    /// and returns what it exported. RUST_LOG is unset, so the default `info`
+    /// applies.
+    fn exported(
+        body: impl FnOnce(),
+    ) -> Vec<opentelemetry_sdk::logs::in_memory_exporter::LogDataWithResource> {
+        std::env::remove_var("RUST_LOG");
         let exporter = InMemoryLogExporter::default();
         let provider = SdkLoggerProvider::builder()
             .with_simple_exporter(exporter.clone())
             .build();
-        let layer =
-            opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider)
-                .with_filter(super::export_filter::<tracing_subscriber::Registry>());
-        let subscriber = tracing_subscriber::registry().with(layer);
-        tracing::subscriber::with_default(subscriber, || {
+        let subscriber = tracing_subscriber::registry()
+            .with(super::filter(true))
+            .with(
+                opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider),
+            );
+        tracing::subscriber::with_default(subscriber, body);
+        provider.force_flush().expect("flush in-memory exporter");
+        exporter
+            .get_emitted_logs()
+            .expect("read in-memory exporter")
+    }
+
+    #[test]
+    fn exporting_filter_allows_application_and_event_records_only() {
+        let emitted = exported(|| {
             tracing::event!(name: "domain-event", target: super::EVENT_TARGET, tracing::Level::INFO, marker = "event");
             tracing::info!(target: "application", "application record");
-            tracing::event!(name: "hyper-record", target: "hyper::client", tracing::Level::TRACE, marker = "denied");
-            tracing::event!(name: "reqwest-record", target: "reqwest::connect", tracing::Level::TRACE, marker = "denied");
-            tracing::event!(name: "h2-record", target: "h2::codec", tracing::Level::TRACE, marker = "denied");
-            tracing::event!(name: "otel-record", target: "opentelemetry_sdk::logs", tracing::Level::TRACE, marker = "denied");
+            tracing::event!(name: "hyper-record", target: "hyper::client", tracing::Level::INFO, marker = "denied");
+            tracing::event!(name: "reqwest-record", target: "reqwest::connect", tracing::Level::INFO, marker = "denied");
+            tracing::event!(name: "h2-record", target: "h2::codec", tracing::Level::INFO, marker = "denied");
+            tracing::event!(name: "otel-record", target: "opentelemetry_sdk::logs", tracing::Level::INFO, marker = "denied");
         });
-        provider.force_flush().expect("flush in-memory exporter");
-        let emitted = exporter
-            .get_emitted_logs()
-            .expect("read in-memory exporter");
         assert_eq!(emitted.len(), 2);
         assert!(emitted
             .iter()
@@ -288,15 +298,5 @@ mod tests {
         assert!(emitted
             .iter()
             .any(|log| log.record.target().map(|target| target.as_ref()) == Some("application")));
-        for denied_target in [
-            "hyper::client",
-            "reqwest::connect",
-            "h2::codec",
-            "opentelemetry_sdk::logs",
-        ] {
-            assert!(emitted.iter().all(|log| {
-                log.record.target().map(|target| target.as_ref()) != Some(denied_target)
-            }));
-        }
     }
 }
