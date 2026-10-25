@@ -5,8 +5,8 @@ use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use std::ops::Deref;
 use std::sync::{Mutex, MutexGuard, OnceLock};
-use tracing_subscriber::filter::Targets;
-use tracing_subscriber::layer::{Layer, SubscriberExt};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
+use tracing_subscriber::registry::LookupSpan;
 
 static INSTALL: OnceLock<InMemoryLogExporter> = OnceLock::new();
 static PROVIDER: OnceLock<&'static SdkLoggerProvider> = OnceLock::new();
@@ -64,9 +64,9 @@ fn install() -> &'static InMemoryLogExporter {
         let tracer_provider = SdkTracerProvider::builder().build();
         let span_layer =
             tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("capture"));
-        let bridge =
-            opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider())
-                .with_filter(target_filter());
+        let bridge = EventsOnly(
+            opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider()),
+        );
         let subscriber = tracing_subscriber::registry().with(span_layer).with(bridge);
         tracing::subscriber::set_global_default(subscriber).unwrap_or_else(|_| {
             panic!("testing capture could not install its subscriber; use testing::layer()")
@@ -80,8 +80,44 @@ fn provider_exporter() -> &'static InMemoryLogExporter {
     INSTALL.get().expect("testing exporter was not initialized")
 }
 
-fn target_filter() -> Targets {
-    Targets::new().with_target(EVENT_TARGET, tracing::Level::TRACE)
+/// Passes only events and error records (target `EVENT_TARGET`) to the wrapped
+/// layer. It gates `on_event` itself instead of using a per-layer filter: a
+/// per-layer filter that refuses an `enabled!` check drops the next event on
+/// that thread, which would lose captured events in binaries that use sqlx.
+struct EventsOnly<L>(L);
+
+impl<S, L> Layer<S> for EventsOnly<L>
+where
+    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+    L: Layer<S>,
+{
+    fn on_layer(&mut self, subscriber: &mut S) {
+        self.0.on_layer(subscriber);
+    }
+
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: Context<'_, S>,
+    ) {
+        self.0.on_new_span(attrs, id, ctx);
+    }
+
+    fn on_record(
+        &self,
+        id: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        ctx: Context<'_, S>,
+    ) {
+        self.0.on_record(id, values, ctx);
+    }
+
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: Context<'_, S>) {
+        if event.metadata().target() == EVENT_TARGET {
+            self.0.on_event(event, ctx);
+        }
+    }
 }
 
 pub fn capture() -> Capture {
@@ -113,10 +149,9 @@ pub fn capture_exclusive() -> ExclusiveCapture {
 
 pub fn layer<S>() -> impl Layer<S>
 where
-    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
 {
-    opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider())
-        .with_filter(target_filter())
+    EventsOnly(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider()))
 }
 
 impl Capture {

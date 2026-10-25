@@ -78,14 +78,15 @@ impl Drop for Guard {
 }
 
 /// Crates the exporter itself logs through. Exporting their records would feed
-/// every export back into the next one.
-const EXPORTER_TARGETS: [&str; 11] = [
+/// every export back into the next one. EnvFilter matches a target by prefix,
+/// so `hyper` also covers `hyper_util`. `tower` is left out on purpose: the
+/// prefix would also take `tower_http`, a server's request log.
+const EXPORTER_TARGETS: [&str; 10] = [
     "hyper",
     "hyper_util",
     "h2",
     "reqwest",
     "rustls",
-    "tower",
     "opentelemetry",
     "opentelemetry_sdk",
     "opentelemetry_otlp",

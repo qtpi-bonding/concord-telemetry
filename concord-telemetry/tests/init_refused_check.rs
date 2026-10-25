@@ -1,4 +1,4 @@
-use concord_telemetry::{init, Config, LocalOutput};
+use concord_telemetry::{init, Config, LocalOutput, EVENT_TARGET};
 
 /// sqlx asks `enabled!` for every query's log level and usually gets "no".
 /// Under per-layer filtering that refusal dropped the next record on the
@@ -15,11 +15,17 @@ fn a_refused_enabled_check_does_not_drop_the_next_record() {
     let guard = init(config).expect("init");
     assert!(!tracing::enabled!(target: "sqlx::query", tracing::Level::DEBUG));
     tracing::info!(target: "application", "after a refused check");
+    assert!(!tracing::enabled!(target: "sqlx::query", tracing::Level::DEBUG));
+    tracing::event!(name: "event-after-check", target: EVENT_TARGET, tracing::Level::INFO, marker = "kept");
     drop(guard);
     let output = std::fs::read_to_string(&file).expect("json output");
     assert!(
         output.contains("after a refused check"),
         "record dropped: {output:?}"
+    );
+    assert!(
+        output.contains("\"marker\":\"kept\""),
+        "event dropped: {output:?}"
     );
     let _ = std::fs::remove_file(file);
 }
