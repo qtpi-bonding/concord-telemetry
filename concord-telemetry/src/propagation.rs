@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// The environment variable hooks and CLIs read and write.
-pub const TRACEPARENT_ENV: &str = "TRACEPARENT";
+pub use concord_telemetry_proto::TRACEPARENT_ENV;
 
 const KEYS: [&str; 2] = ["traceparent", "tracestate"];
 

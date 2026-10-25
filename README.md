@@ -121,7 +121,9 @@ The server span covers a handler up to its response. Items of a streaming
 response are produced outside it and carry no trace id. For other carriers,
 such as NATS headers, `concord_telemetry::propagation` has `inject`,
 `set_parent` and `traceparent`. Hooks and CLIs pass `TRACEPARENT`
-(`set_parent_from_env`); `tracestate` is not carried that way. Without an
+(`set_parent_from_env`); `tracestate` is not carried that way. A crate that
+spawns processes but must stay free of OpenTelemetry takes the variable's
+name from `concord_telemetry_proto::TRACEPARENT_ENV`. Without an
 exporter there are no trace ids and nothing is sent. The `grpc.server` and
 `grpc.client` spans are still created, and stay enabled whatever `RUST_LOG`
 says, including a directive naming `concord_telemetry::grpc` itself. A server

@@ -158,7 +158,7 @@ dependencies = [
 [[package]]
 name = "coded-error"
 version = "0.2.0"
-source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=197076449d81a6552d99ae3e54cdf14067bd0151#197076449d81a6552d99ae3e54cdf14067bd0151"
+source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=be55165013f5d557ecf8e1b1cf784fb3d07e9753#be55165013f5d557ecf8e1b1cf784fb3d07e9753"
 dependencies = [
  "anyhow",
  "coded-error-derive",
@@ -168,7 +168,7 @@ dependencies = [
 [[package]]
 name = "coded-error-derive"
 version = "0.2.0"
-source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=197076449d81a6552d99ae3e54cdf14067bd0151#197076449d81a6552d99ae3e54cdf14067bd0151"
+source = "git+https://github.com/qtpi-bonding/coded-error.git?rev=be55165013f5d557ecf8e1b1cf784fb3d07e9753#be55165013f5d557ecf8e1b1cf784fb3d07e9753"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -203,6 +203,7 @@ dependencies = [
  "anyhow",
  "coded-error",
  "concord-telemetry-derive",
+ "concord-telemetry-proto",
  "http",
  "opentelemetry",
  "opentelemetry-appender-tracing",

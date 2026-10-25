@@ -14,8 +14,9 @@ testing = ["opentelemetry_sdk/testing"]
 grpc = ["dep:http", "dep:tower-layer", "dep:tower-service"]
 
 [dependencies]
+concord-telemetry-proto = { path = "../concord-telemetry-proto", version = "0.1.0" }
 concord-telemetry-derive = { path = "../concord-telemetry-derive", version = "0.1.0" }
-coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "197076449d81a6552d99ae3e54cdf14067bd0151", features = ["anyhow"] }
+coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "be55165013f5d557ecf8e1b1cf784fb3d07e9753", features = ["anyhow"] }
 anyhow = "1"
 opentelemetry = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
 opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
