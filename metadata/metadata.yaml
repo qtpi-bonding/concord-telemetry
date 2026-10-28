@@ -1,0 +1,113 @@
+id: concord-telemetry
+verified_at: a884cce
+public:
+  name: concord-telemetry
+  summary: Rust library that sets up OpenTelemetry logs and traces and emits typed domain events and error records.
+  status: active
+  stage: prototype
+  stack:
+  - Rust
+  - OpenTelemetry
+  - tracing
+  - Protocol Buffers
+  homepage: ''
+  links:
+  - type: repo
+    url: https://github.com/qtpi-bonding/concord-telemetry
+private:
+  started: 2026-10
+  visibility: private
+  license: none
+  ownership: designed and directed; code written with AI assistance
+  build: agentic
+facts:
+- id: otlp-export-opt-in-by-env-endpoint
+  assertion: The crate builds OTLP log and trace exporters (HTTP, binary protobuf) only when OTEL_EXPORTER_OTLP_ENDPOINT is set; when it is unset, no exporter or tracer provider is created and nothing is sent.
+  evidence:
+  - concord-telemetry/src/init.rs
+  - concord-telemetry/tests/export_http.rs
+  - concord-telemetry/tests/init_local_only.rs
+- id: plain-http-default-tls-behind-feature
+  assertion: The default build has no rustls in its dependency tree (scripts/check.sh fails if it appears); the optional tls Cargo feature is what adds opentelemetry-otlp's reqwest-rustls backend. No test exercises an HTTPS endpoint.
+  evidence:
+  - concord-telemetry/Cargo.toml
+  - scripts/check.sh
+- id: local-output-stderr-or-file-never-stdout
+  assertion: Local output goes to stderr for Text and Json, to an append-mode file for JsonFile, and nowhere for Off; no local mode writes to stdout.
+  evidence:
+  - concord-telemetry/src/init.rs
+  - concord-telemetry/tests/json_file.rs
+- id: filter-default-info-rust-log-override
+  assertion: The log level filter is taken from RUST_LOG when set and defaults to info when it is unset.
+  evidence:
+  - concord-telemetry/src/init.rs
+  - concord-telemetry/tests/init_filter.rs
+- id: events-bypass-rust-log
+  assertion: Records with target concord_telemetry::event are enabled at TRACE and gRPC spans with target concord_telemetry::grpc at INFO regardless of RUST_LOG.
+  evidence:
+  - concord-telemetry/src/init.rs
+  - concord-telemetry/tests/init_filter.rs
+  - concord-telemetry/tests/refused.rs
+- id: exporter-crates-silenced-while-exporting
+  assertion: While an OTLP exporter is active, the hyper, h2, reqwest, rustls and opentelemetry* targets are turned off by target prefix in every local and exported output; this is not applied when no exporter is configured.
+  evidence:
+  - concord-telemetry/src/init.rs
+  - concord-telemetry/tests/export_feedback.rs
+- id: flush-on-guard-drop-bounded-by-deadline
+  assertion: Dropping the Guard flushes and shuts down the log and trace providers on a background thread and waits at most Config::flush_deadline (default 2 seconds), leaving any slower flush running detached.
+  evidence:
+  - concord-telemetry/src/init.rs
+  - concord-telemetry/src/deadline.rs
+  - concord-telemetry/tests/guard_deadline.rs
+- id: testing-capture-events-only
+  assertion: With the testing feature enabled, testing::capture() collects only records whose target is concord_telemetry::event into an in-memory exporter and panics if a global tracing subscriber is already installed; testing::layer() with testing::reader() is the non-global alternative.
+  evidence:
+  - concord-telemetry/src/testing.rs
+  - concord-telemetry/tests/capture.rs
+  - concord-telemetry/tests/capture_layer.rs
+  - concord-telemetry/tests/capture_exclusive.rs
+- id: event-derive-emits-info-event
+  assertion: The event! macro calls Event::emit, and the derived emit records a tracing INFO event with target concord_telemetry::event and an event.type attribute of <package>.<Message>.
+  evidence:
+  - concord-telemetry/src/event.rs
+  - concord-telemetry-derive/src/lib.rs
+  - concord-telemetry/tests/event_derive.rs
+- id: derive-rejects-unsafe-fields
+  assertion: '#[derive(Event)] fails to compile without a concord_event package attribute and a source_record_id String field, for any top-level field named in the [never] list of fields.toml, for bytes, map and oneof fields, and for nested messages other than an optional Principal, Timestamp or Duration.'
+  evidence:
+  - concord-telemetry-derive/src/lib.rs
+  - fields.toml
+  - concord-telemetry/tests/ui.rs
+  - concord-telemetry/tests/ui/never_log_name.rs
+  - concord-telemetry/tests/ui/missing_source_record_id.rs
+  - concord-telemetry/tests/ui/bytes_field.rs
+  - concord-telemetry/tests/ui/nested_message.rs
+- id: principal-proto-importable-from-build-rs
+  assertion: A consumer's build script can compile a .proto that imports concord_telemetry/v1/principal.proto by passing concord_telemetry_proto::proto_include_dir() as an include path and mapping .concord_telemetry.v1 to ::concord_telemetry::proto::v1 with extern_path; the in-repo proto-consumer-test crate shows the generated code uses the runtime crate's Principal type.
+  evidence:
+  - concord-telemetry-proto/src/lib.rs
+  - proto-consumer-test/build.rs
+  - proto-consumer-test/proto/consumer/v1/events.proto
+  - proto-consumer-test/src/lib.rs
+- id: trace-context-inject-and-join
+  assertion: propagation::inject writes traceparent (and tracestate only when non-empty) from the current span and writes nothing without a valid span context; set_parent and set_parent_from_env (which reads only traceparent from TRACEPARENT) parent a span only on a valid traceparent; the gRPC client and server layers use this.
+  evidence:
+  - concord-telemetry/src/propagation.rs
+  - concord-telemetry/src/grpc.rs
+  - concord-telemetry/tests/propagation.rs
+  - concord-telemetry/tests/propagation_env.rs
+  - concord-telemetry/tests/grpc.rs
+- id: lint-tracing-fields-registry
+  assertion: concord-lint checks the named and sigil fields of trace!/debug!/info!/warn!/error!/event! calls against the fields.toml registry, reporting unregistered-field and never-log-field, and skips only the unregistered-field check inside test functions and test-gated modules.
+  evidence:
+  - concord-lint/src/scan.rs
+  - concord-lint/src/registry.rs
+  - fields.toml
+  - concord-lint/tests/lint.rs
+  - concord-lint/tests/registry.rs
+- id: lint-process-exit-in-binaries
+  assertion: concord-lint reports process-exit for calls spelled std::process::exit(..) or process::exit(..) in files named main.rs or under src/bin/, and not in other files; a bare exit(..) after a use import is not matched.
+  evidence:
+  - concord-lint/src/scan.rs
+  - concord-lint/tests/lint.rs
+  - concord-lint/tests/fixtures/bin_main/main.rs
