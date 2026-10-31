@@ -21,6 +21,7 @@ pub mod v1 {
         Human = 1,
         Agent = 2,
         Daemon = 3,
+        Service = 4,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
@@ -83,6 +84,7 @@ impl PrincipalKind {
             Self::Human => "PRINCIPAL_KIND_HUMAN",
             Self::Agent => "PRINCIPAL_KIND_AGENT",
             Self::Daemon => "PRINCIPAL_KIND_DAEMON",
+            Self::Service => "PRINCIPAL_KIND_SERVICE",
         }
     }
 
@@ -92,6 +94,7 @@ impl PrincipalKind {
             "PRINCIPAL_KIND_HUMAN" => Some(Self::Human),
             "PRINCIPAL_KIND_AGENT" => Some(Self::Agent),
             "PRINCIPAL_KIND_DAEMON" => Some(Self::Daemon),
+            "PRINCIPAL_KIND_SERVICE" => Some(Self::Service),
             _ => None,
         }
     }

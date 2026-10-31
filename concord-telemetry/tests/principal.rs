@@ -100,3 +100,41 @@ fn rust_verification_matches_proto_file() {
     }
     assert_eq!(n, 1 + Verification::RootSignature as usize);
 }
+
+#[test]
+fn service_kind_round_trips() {
+    let p = Principal::new(PrincipalKind::Service, "central");
+    assert_eq!(PrincipalKind::Service as i32, 4);
+    assert_eq!(p.kind().as_str_name(), "PRINCIPAL_KIND_SERVICE");
+    assert_eq!(
+        PrincipalKind::from_str_name("PRINCIPAL_KIND_SERVICE"),
+        Some(PrincipalKind::Service)
+    );
+    assert_eq!(Principal::decode(&p.encode_to_vec()[..]).unwrap(), p);
+}
+
+#[test]
+fn rust_principal_kind_matches_proto_file() {
+    let proto =
+        include_str!("../../concord-telemetry-proto/proto/concord_telemetry/v1/principal.proto");
+    let body = proto
+        .split("enum PrincipalKind {")
+        .nth(1)
+        .unwrap()
+        .split('}')
+        .next()
+        .unwrap();
+    let mut n = 0;
+    for line in body
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("PRINCIPAL_KIND_"))
+    {
+        let (name, num) = line.trim_end_matches(';').split_once(" = ").unwrap();
+        let v =
+            PrincipalKind::from_str_name(name).unwrap_or_else(|| panic!("{name} missing in Rust"));
+        assert_eq!(v as i32, num.parse::<i32>().unwrap(), "{name}");
+        n += 1;
+    }
+    assert_eq!(n, 1 + PrincipalKind::Service as usize);
+}

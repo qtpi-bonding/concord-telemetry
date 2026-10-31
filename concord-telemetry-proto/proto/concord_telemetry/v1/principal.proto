@@ -17,6 +17,8 @@ enum PrincipalKind {
   PRINCIPAL_KIND_HUMAN = 1;
   PRINCIPAL_KIND_AGENT = 2;
   PRINCIPAL_KIND_DAEMON = 3;
+  // A non-human program acting as itself, such as concordium's central.
+  PRINCIPAL_KIND_SERVICE = 4;
 }
 
 enum Verification {
