@@ -225,10 +225,10 @@ where
 }
 
 pub fn init(config: Config) -> Result<Guard, InitError> {
-    crate::error::set_error_text_from_env();
     if tracing::dispatcher::has_been_set() {
         return Err(InitError::AlreadyInitialized);
     }
+    let unknown_error_text = crate::error::set_error_text_from_env();
 
     let resource = resource(&config);
     let (logs, traces) = if std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_some() {
@@ -274,6 +274,9 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
 
     crate::carrier::set_otel_active(traces.is_some());
     panic::install(logs.clone(), traces.clone());
+    if let Some(value) = unknown_error_text.as_deref() {
+        crate::error::warn_unknown_error_text(value);
+    }
     Ok(Guard {
         logs,
         traces,

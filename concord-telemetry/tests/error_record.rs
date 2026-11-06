@@ -12,6 +12,17 @@ enum ActionError {
     NotFound,
 }
 
+#[derive(Debug, thiserror::Error, coded_error::CodedError)]
+#[coded(namespace = "test.mixed")]
+enum MixedError {
+    #[error("mixed own error")]
+    #[coded(code = "failed", class = Logical)]
+    Failed {
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 #[derive(Clone, Debug)]
 struct Recorded {
     name: &'static str,
@@ -192,7 +203,9 @@ fn own_mode_omits_external_text_but_keeps_codes() {
     let records = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Capture(records.clone()));
     tracing::subscriber::with_default(subscriber, || {
-        let error = anyhow::anyhow!("external detail");
+        let error = coded_error::into_anyhow(MixedError::Failed {
+            source: std::io::Error::other("external detail"),
+        });
         error_anyhow!(&error);
     });
     let records = records.lock().unwrap();
@@ -205,4 +218,10 @@ fn own_mode_omits_external_text_but_keeps_codes() {
         .clone();
     assert!(chain.contains("external"));
     assert!(!chain.contains("external detail"));
+    assert!(chain.contains("test.mixed.failed"));
+    assert!(chain.contains("mixed own error"));
+    assert!(records[0]
+        .fields
+        .iter()
+        .any(|(name, value)| name == "error.message" && value.contains("mixed own error")));
 }

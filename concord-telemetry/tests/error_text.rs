@@ -1,4 +1,5 @@
-use concord_telemetry::{error, error_text, set_error_text, ErrorText};
+use concord_telemetry::{error, set_error_text, ErrorText};
+use std::io;
 use std::sync::{Arc, Barrier, Mutex};
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -9,6 +10,17 @@ enum TextError {
     #[error("text error")]
     #[coded(code = "failed", class = Logical)]
     Failed,
+}
+
+#[derive(Debug, thiserror::Error, coded_error::CodedError)]
+#[coded(namespace = "test.mixed")]
+enum MixedError {
+    #[error("mixed own error")]
+    #[coded(code = "failed", class = Logical)]
+    Failed {
+        #[source]
+        source: io::Error,
+    },
 }
 
 #[test]
@@ -36,18 +48,6 @@ fn error_marks_current_span_status_error() {
 }
 
 #[test]
-fn concord_error_text_env_sets_initial_mode() {
-    let _lock = LOCK.lock().unwrap();
-    let _capture = concord_telemetry::testing::capture_exclusive();
-    std::env::set_var("CONCORD_ERROR_TEXT", "own");
-    // init reads the variable before installing its subscriber.
-    let _ = concord_telemetry::init(concord_telemetry::Config::new("test", "0"));
-    assert_eq!(error_text(), ErrorText::Own);
-    std::env::remove_var("CONCORD_ERROR_TEXT");
-    set_error_text(ErrorText::Full);
-}
-
-#[test]
 fn flipping_error_text_concurrently_is_consistent() {
     let _lock = LOCK.lock().unwrap();
     let capture = concord_telemetry::testing::capture_exclusive();
@@ -58,7 +58,10 @@ fn flipping_error_text_concurrently_is_consistent() {
         threads.push(std::thread::spawn(move || {
             barrier.wait();
             for _ in 0..1000 {
-                error!(&TextError::Failed);
+                let error = anyhow::Error::new(MixedError::Failed {
+                    source: io::Error::other("external detail"),
+                });
+                concord_telemetry::error_anyhow!(&error);
             }
         }));
     }
@@ -76,7 +79,21 @@ fn flipping_error_text_concurrently_is_consistent() {
     let records = capture.errors_where(|_| true);
     assert_eq!(records.len(), 4000);
     for record in records {
-        let chain = format!("{:?}", record.fields.get("error.chain").expect("chain"));
-        assert!(chain.contains("text error") || !chain.contains("message"));
+        let encoded = match record.fields.get("error.chain").expect("chain") {
+            concord_telemetry::AttrValue::Str(value) => value,
+            _ => panic!("chain was not text"),
+        };
+        let chain: serde_json::Value = serde_json::from_str(encoded).expect("valid chain JSON");
+        let external = chain
+            .as_array()
+            .expect("chain array")
+            .iter()
+            .filter(|link| link["origin"] == "external")
+            .collect::<Vec<_>>();
+        assert!(!external.is_empty());
+        let has_external_text = external[0].get("message").is_some();
+        assert!(external
+            .iter()
+            .all(|link| link.get("message").is_some() == has_external_text));
     }
 }

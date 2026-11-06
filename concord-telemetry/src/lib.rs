@@ -1,7 +1,7 @@
 mod baggage;
 pub mod carrier;
 mod deadline;
-mod error;
+pub mod error;
 mod event;
 mod init;
 mod logfmt;
@@ -35,6 +35,7 @@ pub use principal::{Principal, PrincipalKind, Verification};
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::error;
     pub use coded_error;
     pub use opentelemetry;
     pub use prost_types;
