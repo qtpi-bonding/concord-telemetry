@@ -20,6 +20,7 @@ request_id = { type = "str", meaning = "Id of one request" }
 header = { type = "str", meaning = "Name of a carrier header that was dropped" }
 hop = { type = "str", meaning = "Name of a boundary a trace crosses, as dotted words" }
 dropped = { type = "int", meaning = "Count of entries dropped from a carrier" }
+error_text = { type = "str", meaning = "A CONCORD_ERROR_TEXT value that was not recognised" }
 instance_id = { type = "str", meaning = "Instance id" }
 label = { type = "str", meaning = "Short fixed label" }
 error = { type = "str", meaning = "Display of an error, local debug logs only (rule 5)" }

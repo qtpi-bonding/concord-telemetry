@@ -50,8 +50,12 @@ pub fn set_error_text_from_env() -> Option<String> {
 #[doc(hidden)]
 pub fn warn_unknown_error_text(value: &str) {
     set_error_text(ErrorText::Full);
-    UNKNOWN_TEXT_WARNING
-        .call_once(|| tracing::warn!("unknown CONCORD_ERROR_TEXT value {:?}; using full", value));
+    UNKNOWN_TEXT_WARNING.call_once(|| {
+        tracing::warn!(
+            error_text = value,
+            "unknown CONCORD_ERROR_TEXT value; using full"
+        )
+    });
 }
 
 // Kept as ordinary functions so macro expansions contain no chain or JSON logic.
