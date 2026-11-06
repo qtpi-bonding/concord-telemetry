@@ -2,6 +2,8 @@ use concord_telemetry::{error, error_anyhow};
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::{layer::Context, layer::SubscriberExt, Layer};
 
+static LOCK: Mutex<()> = Mutex::new(());
+
 #[derive(Debug, thiserror::Error, coded_error::CodedError)]
 #[coded(namespace = "test.action")]
 enum ActionError {
@@ -62,6 +64,7 @@ fn capture() -> Arc<Mutex<Vec<Recorded>>> {
 
 #[test]
 fn records_facts_without_display_text() {
+    let _lock = LOCK.lock().unwrap();
     let records = capture();
     let records = records.lock().unwrap();
     let coded = &records[0];
@@ -98,6 +101,7 @@ fn records_facts_without_display_text() {
         record
             .fields
             .iter()
+            .filter(|(name, _)| name != "error.chain" && name != "error.message")
             .all(|(_, value)| !value.contains("a1 not found"))
     }));
 
@@ -114,12 +118,14 @@ fn records_facts_without_display_text() {
         record
             .fields
             .iter()
+            .filter(|(name, _)| name != "error.chain" && name != "error.message")
             .all(|(_, value)| !value.contains("boom"))
     }));
 }
 
 #[test]
 fn error_anyhow_without_source_uses_the_module_path() {
+    let _lock = LOCK.lock().unwrap();
     let records = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Capture(records.clone()));
     tracing::subscriber::with_default(subscriber, || {
@@ -151,4 +157,52 @@ fn error_anyhow_without_source_uses_the_module_path() {
         get(&records[1], "error.source"),
         format!("\"{}\"", module_path!())
     );
+}
+
+#[test]
+fn error_record_has_chain_with_text_under_full() {
+    let _lock = LOCK.lock().unwrap();
+    concord_telemetry::set_error_text(concord_telemetry::ErrorText::Full);
+    let records = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Capture(records.clone()));
+    tracing::subscriber::with_default(subscriber, || {
+        let error = ActionError::NotFound;
+        error!(&error);
+    });
+    let records = records.lock().unwrap();
+    let chain = records[0]
+        .fields
+        .iter()
+        .find(|(name, _)| name == "error.chain")
+        .unwrap()
+        .1
+        .clone();
+    assert!(chain.contains("test.action.not_found"));
+    assert!(chain.contains("action a1 not found"));
+    assert!(records[0]
+        .fields
+        .iter()
+        .any(|(name, value)| name == "error.message" && value.contains("action a1 not found")));
+}
+
+#[test]
+fn own_mode_omits_external_text_but_keeps_codes() {
+    let _lock = LOCK.lock().unwrap();
+    concord_telemetry::set_error_text(concord_telemetry::ErrorText::Own);
+    let records = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Capture(records.clone()));
+    tracing::subscriber::with_default(subscriber, || {
+        let error = anyhow::anyhow!("external detail");
+        error_anyhow!(&error);
+    });
+    let records = records.lock().unwrap();
+    let chain = records[0]
+        .fields
+        .iter()
+        .find(|(name, _)| name == "error.chain")
+        .unwrap()
+        .1
+        .clone();
+    assert!(chain.contains("external"));
+    assert!(!chain.contains("external detail"));
 }

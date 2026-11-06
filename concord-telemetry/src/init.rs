@@ -225,6 +225,7 @@ where
 }
 
 pub fn init(config: Config) -> Result<Guard, InitError> {
+    crate::error::set_error_text_from_env();
     if tracing::dispatcher::has_been_set() {
         return Err(InitError::AlreadyInitialized);
     }

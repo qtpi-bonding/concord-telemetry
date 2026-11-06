@@ -27,6 +27,7 @@ pub use carrier::{BAGGAGE_DROPPED_CODE, CARRIER_DROPPED_CODE, TRACE_MISSING_CODE
 pub use concord_telemetry_proto::TraceCarrier;
 
 pub use concord_telemetry_derive::Event;
+pub use error::{error_text, set_error_text, ErrorText};
 pub use event::{AttrValue, Attrs, Event, RebuildError};
 pub use init::{init, Config, Guard, InitError, LocalOutput, EVENT_TARGET};
 pub use panic::PANIC_CODE;
@@ -35,7 +36,9 @@ pub use principal::{Principal, PrincipalKind, Verification};
 #[doc(hidden)]
 pub mod __private {
     pub use coded_error;
+    pub use opentelemetry;
     pub use prost_types;
     pub use serde_json;
     pub use tracing;
+    pub use tracing_opentelemetry;
 }
