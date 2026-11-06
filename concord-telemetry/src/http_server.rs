@@ -1,6 +1,6 @@
 //! HTTP server tracing and ingress propagation.
 
-use crate::{carrier, TraceCarrier};
+use crate::{carrier, init::HTTP_TARGET, TraceCarrier};
 use std::task::{Context, Poll};
 use tower_layer::Layer;
 use tower_service::Service;
@@ -36,7 +36,10 @@ where
     }
 
     fn call(&mut self, request: http::Request<B>) -> Self::Future {
+        // A fixed target that init always enables, as for gRPC: a span
+        // disabled by RUST_LOG would silently drop the caller's trace.
         let span = tracing::info_span!(
+            target: HTTP_TARGET,
             "http.server",
             otel.name = %request.uri().path(),
             otel.kind = "server",
