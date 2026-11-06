@@ -240,16 +240,19 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
     let local = local_layer(config.local)?;
     let log_layer = logs.as_ref().map(log_bridge_layer);
     let trace_layer = traces.as_ref().map(span_layer);
+    let baggage_layer = traces.as_ref().map(|_| crate::baggage::BaggageLayer);
 
     let subscriber = tracing_subscriber::registry()
         .with(filter(logs.is_some()))
         .with(trace_layer)
+        .with(baggage_layer)
         .with(log_layer)
         .with(local);
     if subscriber.try_init().is_err() {
         return Err(InitError::AlreadyInitialized);
     }
 
+    crate::carrier::set_otel_active(traces.is_some());
     panic::install(logs.clone(), traces.clone());
     Ok(Guard {
         logs,

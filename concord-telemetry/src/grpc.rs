@@ -8,17 +8,19 @@
 //! streaming response produces later are polled outside it, so their records
 //! carry no trace id.
 
-use crate::{init::GRPC_TARGET, propagation};
+use crate::{carrier, init::GRPC_TARGET, TraceCarrier};
 use std::task::{Context, Poll};
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::instrument::{Instrument, Instrumented};
 
-/// Joins each request's trace, if it carries one, in a `grpc.server` span.
+/// Joins each request's trace and baggage, if it carries them, in a
+/// `grpc.server` span. A request without a trace is not an error: the server
+/// is an ingress.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ServerLayer;
 
-/// Sends the trace of a `grpc.client` span with each request.
+/// Sends the trace and baggage of a `grpc.client` span with each request.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ClientLayer;
 
@@ -74,12 +76,13 @@ where
             rpc.system = "grpc",
         );
         let headers = request.headers();
-        propagation::set_parent(&span, |key| {
+        let incoming = TraceCarrier::from_pairs(|key| {
             headers
                 .get(key)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned)
         });
+        carrier::extract_ingress("grpc", &span, &incoming);
         let future = span.in_scope(|| self.inner.call(request));
         future.instrument(span)
     }
@@ -107,7 +110,7 @@ where
         );
         let future = span.in_scope(|| {
             let headers = request.headers_mut();
-            propagation::inject(|key, value| {
+            crate::propagation::inject(|key, value| {
                 if let (Ok(name), Ok(value)) = (
                     http::HeaderName::from_bytes(key.as_bytes()),
                     http::HeaderValue::from_str(&value),

@@ -1,6 +1,6 @@
 use concord_telemetry::grpc::{client, ServerLayer};
 use concord_telemetry::propagation::traceparent;
-use concord_telemetry::testing::capture_exclusive;
+use concord_telemetry::testing::{capture_exclusive, set_otel_active};
 use concord_telemetry::EVENT_TARGET;
 use std::convert::Infallible;
 use tower::{service_fn, Layer, ServiceExt};
@@ -119,4 +119,49 @@ async fn without_the_header_the_server_starts_its_own_trace() {
         .trace_id_for("grpc-stripped")
         .expect("trace context");
     assert_ne!(hex(actual), expected[3..35]);
+}
+
+fn baggage_header(request: &Request) -> Option<String> {
+    request
+        .headers()
+        .get("baggage")
+        .map(|value| value.to_str().expect("ascii").to_owned())
+}
+
+#[tokio::test]
+async fn grpc_baggage_round_trips_client_to_server() {
+    let _captured = capture_exclusive();
+    set_otel_active(true);
+    let caller = info_span!("caller");
+    caller.in_scope(|| concord_telemetry::context::add("action_id", "A1"));
+    let request = sent(request(None)).instrument(caller).await;
+    assert_eq!(baggage_header(&request).as_deref(), Some("action_id=A1"));
+
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let handler_seen = seen.clone();
+    let handler = service_fn(move |_: Request| {
+        let handler_seen = handler_seen.clone();
+        async move {
+            *handler_seen.lock().unwrap() = Some(concord_telemetry::carrier::capture());
+            Ok::<_, Infallible>(())
+        }
+    });
+    ServerLayer
+        .layer(handler)
+        .oneshot(request)
+        .instrument(tracing::Span::none())
+        .await
+        .expect("infallible");
+    set_otel_active(false);
+    let seen = seen.lock().unwrap().take().expect("handler ran");
+    assert_eq!(seen.baggage.as_deref(), Some("action_id=A1"));
+}
+
+#[tokio::test]
+async fn grpc_server_is_silent_on_empty_carrier() {
+    let captured = capture_exclusive();
+    set_otel_active(true);
+    served("grpc-stripped", request(None)).await;
+    set_otel_active(false);
+    assert!(captured.errors_where(|_| true).is_empty());
 }

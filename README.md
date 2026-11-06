@@ -120,8 +120,8 @@ FooClient::new(concord_telemetry::grpc::client(channel))       // sends it
 The server span covers a handler up to its response. Items of a streaming
 response are produced outside it and carry no trace id. For other carriers,
 such as NATS headers, `concord_telemetry::propagation` has `inject`,
-`set_parent` and `traceparent`. Hooks and CLIs pass `TRACEPARENT`
-(`set_parent_from_env`); `tracestate` is not carried that way. A crate that
+`set_parent` and `traceparent`. Hooks and CLIs pass `TRACEPARENT` and
+`BAGGAGE` (`set_parent_from_env`); `tracestate` is not carried that way. A crate that
 spawns processes but must stay free of OpenTelemetry takes the variable's
 name from `concord_telemetry_proto::TRACEPARENT_ENV`. Without an
 exporter there are no trace ids and nothing is sent. The `grpc.server` and
@@ -129,6 +129,27 @@ exporter there are no trace ids and nothing is sent. The `grpc.server` and
 says, including a directive naming `concord_telemetry::grpc` itself. A server
 joins any valid `traceparent` it receives, so an untrusted caller chooses the
 trace id and the sampled flag of its own requests.
+
+### Carriers and baggage
+
+`concord_telemetry::carrier` moves a trace across a boundary as a
+`TraceCarrier` (the three header values; `proto::v1::TraceCarrier` is its
+protobuf form): `capture()` takes the current span's, `parent_on` joins it,
+`link_from` starts a new trace linked to it, and `root(name)` starts one with
+no parent. `extract_required(hop, ..)` is `parent_on` for a hop that must
+carry a trace: with an exporter and no valid `traceparent` it records
+`concord.trace.missing` with a `hop` field. `extract_ingress(name, ..)` is
+silent on an empty carrier and sets the span attribute `ingress`; the gRPC
+`ServerLayer` is an ingress.
+
+`context::add("action_id", id)` puts a label in the current span's baggage:
+children and outgoing carriers inherit it, and it is a span attribute.
+Baggage is labels only, never authorization or routing. At most 8 entries,
+keys up to 64 bytes, values up to 128, the header up to 1024 and `tracestate`
+up to 256. Over a cap, or malformed, an entry is dropped and the header's
+drops are recorded once as `concord.trace.baggage_dropped` with `dropped`;
+the request proceeds. Without an exporter every one of these is a no-op,
+`concord.trace.missing` never fires, and local output is unchanged.
 
 ## Testing
 

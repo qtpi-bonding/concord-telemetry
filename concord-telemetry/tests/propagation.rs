@@ -87,3 +87,26 @@ fn without_a_span_nothing_is_injected() {
         assert_eq!(calls, 0);
     });
 }
+
+#[test]
+fn nats_style_inject_set_parent_carries_baggage() {
+    use concord_telemetry::context;
+    let _captured = capture_exclusive();
+    let mut headers = HashMap::new();
+    let first = info_span!("nats-first");
+    first.in_scope(|| {
+        context::add("action_id", "A1");
+        inject(|key, value| {
+            headers.insert(key.to_owned(), value);
+        });
+    });
+    assert_eq!(
+        headers.get("baggage").map(String::as_str),
+        Some("action_id=A1")
+    );
+
+    let second = tracing::Span::none().in_scope(|| info_span!("nats-second"));
+    set_parent(&second, |key| headers.get(key).cloned());
+    let carried = second.in_scope(concord_telemetry::carrier::capture);
+    assert_eq!(carried.baggage.as_deref(), Some("action_id=A1"));
+}

@@ -2,7 +2,7 @@ use crate::{AttrValue, Attrs, Event, EVENT_TARGET};
 use opentelemetry::logs::AnyValue;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData};
 use std::ops::Deref;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
@@ -11,6 +11,7 @@ use tracing_subscriber::registry::LookupSpan;
 static INSTALL: OnceLock<InMemoryLogExporter> = OnceLock::new();
 static PROVIDER: OnceLock<&'static SdkLoggerProvider> = OnceLock::new();
 static SUBSCRIBER_INSTALLED: OnceLock<()> = OnceLock::new();
+static SPANS: OnceLock<InMemorySpanExporter> = OnceLock::new();
 static EXCLUSIVE: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,13 +62,20 @@ fn install() -> &'static InMemoryLogExporter {
         if tracing::dispatcher::has_been_set() {
             panic!("testing capture could not install its subscriber; use testing::layer()")
         }
-        let tracer_provider = SdkTracerProvider::builder().build();
+        let span_exporter = InMemorySpanExporter::default();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(span_exporter.clone())
+            .build();
+        let _ = SPANS.set(span_exporter);
         let span_layer =
             tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("capture"));
         let bridge = EventsOnly(
             opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider()),
         );
-        let subscriber = tracing_subscriber::registry().with(span_layer).with(bridge);
+        let subscriber = tracing_subscriber::registry()
+            .with(span_layer)
+            .with(crate::baggage::BaggageLayer)
+            .with(bridge);
         tracing::subscriber::set_global_default(subscriber).unwrap_or_else(|_| {
             panic!("testing capture could not install its subscriber; use testing::layer()")
         });
@@ -118,6 +126,26 @@ where
             self.0.on_event(event, ctx);
         }
     }
+}
+
+/// The spans that have ended since `capture()` installed the subscriber,
+/// oldest first. A span is exported when it closes, so drop it first. Empty
+/// when `capture()` was never called.
+pub fn spans() -> Vec<SpanData> {
+    SPANS
+        .get()
+        .map(|exporter| {
+            exporter
+                .get_finished_spans()
+                .expect("read testing span exporter")
+        })
+        .unwrap_or_default()
+}
+
+/// Sets whether an exporter counts as configured, which `extract_required`
+/// checks before it records `concord.trace.missing`. `capture()` leaves it off.
+pub fn set_otel_active(active: bool) {
+    crate::carrier::set_otel_active(active);
 }
 
 pub fn capture() -> Capture {
