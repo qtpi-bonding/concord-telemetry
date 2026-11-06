@@ -189,7 +189,7 @@ where
                 .with_writer(std::io::stderr)
                 .with_ansi(std::io::stderr().is_terminal())
                 .event_format(TraceFormat::text(
-                    tracing_subscriber::fmt::format(),
+                    tracing_subscriber::fmt::format().with_ansi(std::io::stderr().is_terminal()),
                     crate::carrier::otel_active,
                 )),
         ),

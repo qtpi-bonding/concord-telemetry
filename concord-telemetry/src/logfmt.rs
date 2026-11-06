@@ -80,36 +80,81 @@ where
         mut writer: Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> fmt::Result {
+        if !(self.active)() {
+            return self.inner.format_event(ctx, writer.by_ref(), event);
+        }
+        let Some((trace_id, span_id)) = current_ids() else {
+            return self.inner.format_event(ctx, writer.by_ref(), event);
+        };
+        if !self.json {
+            // The inner formatter keeps its own colour setting (`Format::with_ansi`);
+            // the adapter only holds back the final newline for the suffix.
+            let mut held = HoldNewline {
+                out: &mut writer,
+                held: false,
+            };
+            self.inner
+                .format_event(ctx, Writer::new(&mut held), event)?;
+            return held.finish(&format!(" trace={}", &trace_id[..8]));
+        }
         let mut line = String::new();
         self.inner
             .format_event(ctx, Writer::new(&mut line), event)?;
-        if !(self.active)() {
-            return writer.write_str(&line);
-        }
-        let Some((trace_id, span_id)) = current_ids() else {
+        let body = line.strip_suffix('\n').unwrap_or(&line);
+        let Some(body) = body.strip_suffix('}') else {
             return writer.write_str(&line);
         };
-        let body = line.strip_suffix('\n').unwrap_or(&line);
-        if self.json {
-            let Some(body) = body.strip_suffix('}') else {
-                return writer.write_str(&line);
-            };
-            let entries = ctx
-                .lookup_current()
-                .and_then(|span| span.extensions().get::<BaggageMap>().cloned())
-                .unwrap_or_default();
-            let baggage: serde_json::Map<String, serde_json::Value> = entries
-                .0
-                .into_iter()
-                .map(|(key, value)| (key, serde_json::Value::String(value)))
-                .collect();
-            let baggage = serde_json::Value::Object(baggage);
-            writeln!(
-                writer,
-                "{body},\"trace_id\":\"{trace_id}\",\"span_id\":\"{span_id}\",\"baggage\":{baggage}}}"
-            )
-        } else {
-            writeln!(writer, "{body} trace={}", &trace_id[..8])
+        let entries = ctx
+            .event_scope()
+            .and_then(|mut scope| scope.next())
+            .and_then(|span| span.extensions().get::<BaggageMap>().cloned())
+            .unwrap_or_default();
+        let baggage: serde_json::Map<String, serde_json::Value> = entries
+            .0
+            .into_iter()
+            .map(|(key, value)| (key, serde_json::Value::String(value)))
+            .collect();
+        let baggage = serde_json::Value::Object(baggage);
+        writeln!(
+            writer,
+            "{body},\"trace_id\":\"{trace_id}\",\"span_id\":\"{span_id}\",\"baggage\":{baggage}}}"
+        )
+    }
+}
+
+/// Passes writes through, holding back a trailing newline so a suffix can go
+/// before it.
+struct HoldNewline<'a, 'w> {
+    out: &'a mut Writer<'w>,
+    held: bool,
+}
+
+impl HoldNewline<'_, '_> {
+    fn finish(self, suffix: &str) -> fmt::Result {
+        self.out.write_str(suffix)?;
+        if self.held {
+            self.out.write_char('\n')?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Write for HoldNewline<'_, '_> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        if text.is_empty() {
+            return Ok(());
+        }
+        if self.held {
+            self.out.write_char('\n')?;
+            self.held = false;
+        }
+        match text.strip_suffix('\n') {
+            Some(rest) => {
+                self.out.write_str(rest)?;
+                self.held = true;
+                Ok(())
+            }
+            None => self.out.write_str(text),
         }
     }
 }
@@ -176,11 +221,19 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
         record: &mut SdkLogRecord,
         instrumentation: &opentelemetry::InstrumentationScope,
     ) {
-        Context::map_current(|context| {
-            for (key, (value, _)) in context.baggage().iter() {
-                record.add_attribute(key.clone(), AnyValue::from(value.to_string()));
-            }
+        let baggage: Vec<_> = Context::map_current(|context| {
+            context
+                .baggage()
+                .iter()
+                .map(|(key, (value, _))| (key.clone(), value.to_string()))
+                .collect()
         });
+        for (key, value) in baggage {
+            // The event's own field of the same name wins.
+            if !record.attributes_iter().any(|(own, _)| *own == key) {
+                record.add_attribute(key, AnyValue::from(value));
+            }
+        }
         self.0.emit(record, instrumentation);
     }
 
@@ -207,5 +260,95 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
 
     fn set_resource(&mut self, resource: &Resource) {
         self.0.set_resource(resource);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fmt::Write as _;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("buffer").extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Buffer {
+        type Writer = Buffer;
+
+        fn make_writer(&'a self) -> Buffer {
+            self.clone()
+        }
+    }
+
+    fn on() -> bool {
+        true
+    }
+
+    fn off() -> bool {
+        false
+    }
+
+    /// A text line through `TraceFormat`, with the layer's own ANSI setting
+    /// `layer_ansi` and the inner format's `format_ansi`.
+    fn text_line(active: fn() -> bool, layer_ansi: bool, format_ansi: Option<bool>) -> String {
+        let buffer = Buffer::default();
+        let mut inner = tracing_subscriber::fmt::format();
+        if let Some(ansi) = format_ansi {
+            inner = inner.with_ansi(ansi);
+        }
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(layer_ansi)
+                .with_writer(buffer.clone())
+                .event_format(TraceFormat::text(inner, active)),
+        );
+        tracing::subscriber::with_default(subscriber, || tracing::info!("hello"));
+        let bytes = buffer.0.lock().expect("buffer").clone();
+        String::from_utf8(bytes).expect("utf8")
+    }
+
+    #[test]
+    fn text_keeps_ansi_when_inactive() {
+        assert!(text_line(off, true, None).contains('\u{1b}'));
+        assert!(!text_line(off, false, None).contains('\u{1b}'));
+    }
+
+    #[test]
+    fn text_keeps_ansi_through_the_active_path() {
+        // A scoped subscriber hides the span from `Span::current()`, so this
+        // takes the delegate path; the ids path is covered by text_trace_suffix.
+        assert!(text_line(on, true, None).contains('\u{1b}'));
+    }
+
+    #[test]
+    fn the_inner_format_colours_independently_of_the_writer() {
+        assert!(text_line(off, false, Some(true)).contains('\u{1b}'));
+    }
+
+    #[test]
+    fn hold_newline_puts_the_suffix_before_the_final_newline_only() {
+        let mut out = String::new();
+        let mut writer = Writer::new(&mut out);
+        let mut held = HoldNewline {
+            out: &mut writer,
+            held: false,
+        };
+        held.write_str("a\nb").expect("write");
+        held.write_str("c\n").expect("write");
+        held.finish(" trace=x").expect("finish");
+        assert_eq!(out, "a\nbc trace=x\n");
     }
 }
