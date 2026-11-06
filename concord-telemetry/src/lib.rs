@@ -9,6 +9,11 @@ mod panic;
 mod principal;
 pub mod propagation;
 
+#[cfg(feature = "channel")]
+pub mod channel;
+#[cfg(feature = "http-server")]
+pub mod http_server;
+
 pub use carrier::context;
 
 #[cfg(feature = "grpc")]

@@ -39,6 +39,14 @@ Plain HTTP by default with no TLS stack in the tree. HTTPS to the collector is
 behind the optional `tls` feature (reqwest's rustls, aws-lc-rs). TLS is an ops
 concern; prefer a tailnet or a Caddy in front.
 
+## Trace-aware boundaries
+
+The optional `channel` feature provides `channel::traced` and
+`channel::spawn_traced`, which carry the current tracing span (including its
+baggage) across Tokio channels and spawned tasks. The optional `http-server`
+feature provides `http_server::IngressLayer` for joining W3C HTTP ingress
+headers in an `http.server` span.
+
 ## Events
 
 ```rust

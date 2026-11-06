@@ -12,6 +12,8 @@ reqwest-blocking-client = ["opentelemetry-otlp/reqwest-blocking-client"]
 tls = ["reqwest-blocking-client", "opentelemetry-otlp/reqwest-rustls"]
 testing = ["opentelemetry_sdk/testing"]
 grpc = ["dep:http", "dep:tower-layer", "dep:tower-service"]
+channel = ["dep:tokio"]
+http-server = ["dep:http", "dep:tower", "dep:tower-layer", "dep:tower-service"]
 
 [dependencies]
 concord-telemetry-proto = { path = "../concord-telemetry-proto", version = "0.1.0" }
@@ -33,6 +35,8 @@ thiserror = "2"
 http = { version = "1", optional = true }
 tower-layer = { version = "0.3", optional = true }
 tower-service = { version = "0.3", optional = true }
+tower = { version = "0.5", optional = true }
+tokio = { version = "1", optional = true, features = ["sync", "rt"] }
 
 [dev-dependencies]
 trybuild = "1"
