@@ -33,7 +33,7 @@ pub(crate) fn set_otel_active(active: bool) {
     OTEL_ACTIVE.store(active, Ordering::Relaxed);
 }
 
-fn otel_active() -> bool {
+pub(crate) fn otel_active() -> bool {
     OTEL_ACTIVE.load(Ordering::Relaxed)
 }
 

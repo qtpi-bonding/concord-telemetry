@@ -1,7 +1,12 @@
+use crate::logfmt::{BaggageBridge, BaggageLogProcessor, TraceFormat};
 use crate::{deadline::run_with_deadline, panic, Principal, PrincipalKind};
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
-use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider, Resource};
+use opentelemetry_sdk::{
+    logs::{BatchLogProcessor, SdkLoggerProvider},
+    trace::SdkTracerProvider,
+    Resource,
+};
 use std::hash::{BuildHasher, Hasher};
 use std::{fs::OpenOptions, io::IsTerminal, path::PathBuf, sync::Mutex, time::Duration};
 use tracing_subscriber::{
@@ -158,6 +163,22 @@ fn resource(config: &Config) -> Resource {
 
 type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
+/// The JSON line layer: the stock JSON format plus the trace fields.
+fn json_layer<S, W>(writer: W) -> impl Layer<S>
+where
+    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+    W: for<'a> tracing_subscriber::fmt::MakeWriter<'a> + 'static,
+{
+    tracing_subscriber::fmt::layer()
+        .fmt_fields(tracing_subscriber::fmt::format::JsonFields::new())
+        .event_format(TraceFormat::json(
+            tracing_subscriber::fmt::format().json(),
+            crate::carrier::otel_active,
+        ))
+        .with_writer(writer)
+        .with_ansi(false)
+}
+
 fn local_layer<S>(local: LocalOutput) -> Result<Option<BoxedLayer<S>>, InitError>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
@@ -166,26 +187,20 @@ where
         LocalOutput::Text => Box::new(
             tracing_subscriber::fmt::layer()
                 .with_writer(std::io::stderr)
-                .with_ansi(std::io::stderr().is_terminal()),
+                .with_ansi(std::io::stderr().is_terminal())
+                .event_format(TraceFormat::text(
+                    tracing_subscriber::fmt::format(),
+                    crate::carrier::otel_active,
+                )),
         ),
-        LocalOutput::Json => Box::new(
-            tracing_subscriber::fmt::layer()
-                .json()
-                .with_writer(std::io::stderr)
-                .with_ansi(false),
-        ),
+        LocalOutput::Json => Box::new(json_layer(std::io::stderr)),
         LocalOutput::JsonFile(path) => {
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(path)
                 .map_err(InitError::JsonFile)?;
-            Box::new(
-                tracing_subscriber::fmt::layer()
-                    .json()
-                    .with_writer(Mutex::new(file))
-                    .with_ansi(false),
-            )
+            Box::new(json_layer(Mutex::new(file)))
         }
         LocalOutput::Off => return Ok(None),
     };
@@ -196,7 +211,9 @@ fn log_bridge_layer<S>(provider: &SdkLoggerProvider) -> BoxedLayer<S>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
 {
-    Box::new(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider))
+    Box::new(BaggageBridge(
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider),
+    ))
 }
 
 fn span_layer<S>(provider: &SdkTracerProvider) -> BoxedLayer<S>
@@ -226,7 +243,9 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
             .map_err(|error| InitError::Exporter(error.to_string()))?;
         let logs = SdkLoggerProvider::builder()
             .with_resource(resource.clone())
-            .with_batch_exporter(log_exporter)
+            .with_log_processor(BaggageLogProcessor(
+                BatchLogProcessor::builder(log_exporter).build(),
+            ))
             .build();
         let traces = SdkTracerProvider::builder()
             .with_resource(resource)

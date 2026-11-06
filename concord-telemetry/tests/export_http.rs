@@ -84,6 +84,7 @@ fn exports_logs_and_traces_over_http() {
     tracing::event!(name: "test.events.v1.X", target: EVENT_TARGET, tracing::Level::INFO, marker = "event-value", asserted_field = "asserted-value");
     let span = tracing::info_span!("exported-span");
     let entered = span.enter();
+    concord_telemetry::context::add("action_id", "A1");
     tracing::info!("inside exported span");
     drop(entered);
     drop(span);
@@ -153,6 +154,33 @@ fn exports_logs_and_traces_over_http() {
         plain.body.as_ref().and_then(|body| body.value.as_ref()),
         Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "log record"
     ));
+    let inside = logs
+        .resource_logs
+        .iter()
+        .flat_map(|resource| resource.scope_logs.iter())
+        .flat_map(|scope| scope.log_records.iter())
+        .find(|record| {
+            matches!(
+                record.body.as_ref().and_then(|body| body.value.as_ref()),
+                Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "inside exported span"
+            )
+        })
+        .expect("record emitted inside the span");
+    let baggage = inside
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key == "action_id")
+        .expect("exported log record carries the baggage attribute");
+    assert!(
+        matches!(baggage.value.as_ref().and_then(|value| value.value.as_ref()), Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value)) if value == "A1")
+    );
+    assert!(
+        !plain
+            .attributes
+            .iter()
+            .any(|attribute| attribute.key == "action_id"),
+        "a record outside any span has no baggage"
+    );
     let marker = log
         .attributes
         .iter()

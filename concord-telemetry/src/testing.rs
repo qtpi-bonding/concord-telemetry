@@ -1,7 +1,8 @@
+use crate::logfmt::{BaggageBridge, BaggageLogProcessor};
 use crate::{AttrValue, Attrs, Event, EVENT_TARGET};
 use opentelemetry::logs::AnyValue;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
+use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider, SimpleLogProcessor};
 use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData};
 use std::ops::Deref;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -46,7 +47,9 @@ fn provider() -> &'static SdkLoggerProvider {
         let exporter = InMemoryLogExporter::default();
         let provider = Box::leak(Box::new(
             SdkLoggerProvider::builder()
-                .with_simple_exporter(exporter.clone())
+                .with_log_processor(BaggageLogProcessor(SimpleLogProcessor::new(
+                    exporter.clone(),
+                )))
                 .build(),
         ));
         INSTALL
@@ -69,9 +72,9 @@ fn install() -> &'static InMemoryLogExporter {
         let _ = SPANS.set(span_exporter);
         let span_layer =
             tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("capture"));
-        let bridge = EventsOnly(
+        let bridge = EventsOnly(BaggageBridge(
             opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider()),
-        );
+        ));
         let subscriber = tracing_subscriber::registry()
             .with(span_layer)
             .with(crate::baggage::BaggageLayer)

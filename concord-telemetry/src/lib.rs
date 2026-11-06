@@ -4,6 +4,7 @@ mod deadline;
 mod error;
 mod event;
 mod init;
+mod logfmt;
 mod panic;
 mod principal;
 pub mod propagation;
