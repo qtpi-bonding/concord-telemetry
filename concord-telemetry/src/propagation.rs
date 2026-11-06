@@ -58,6 +58,7 @@ pub fn set_parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>) {
 pub(crate) fn parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>) -> bool {
     let context = carrier::extract_context(&get);
     let valid = context.span().span_context().is_valid();
+    carrier::report_invalid(span, &get, valid);
     if valid {
         // Every error means no OpenTelemetry parent can be set (no layer,
         // span disabled, already started); none is worth reporting.

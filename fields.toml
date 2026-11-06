@@ -17,6 +17,7 @@ build_id = { type = "str", meaning = "archegraph build id" }
 blueprint_name = { type = "str", meaning = "archegraph Blueprint name" }
 turn_id = { type = "str", meaning = "Id of one agent turn" }
 request_id = { type = "str", meaning = "Id of one request" }
+header = { type = "str", meaning = "Name of a carrier header that was dropped" }
 hop = { type = "str", meaning = "Name of a boundary a trace crosses, as dotted words" }
 dropped = { type = "int", meaning = "Count of entries dropped from a carrier" }
 instance_id = { type = "str", meaning = "Instance id" }

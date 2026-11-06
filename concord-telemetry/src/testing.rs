@@ -175,6 +175,9 @@ pub fn capture_exclusive() -> ExclusiveCapture {
     }
 }
 
+/// The log bridge for a foreign subscriber you install yourself. It does not
+/// install `BaggageLayer`, so baggage helpers are no-ops under it; use
+/// `capture()` to test baggage.
 pub fn layer<S>() -> impl Layer<S>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,

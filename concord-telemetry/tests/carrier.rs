@@ -1,7 +1,7 @@
 use concord_telemetry::carrier;
 use concord_telemetry::context;
 use concord_telemetry::testing::{capture_exclusive, set_otel_active, spans};
-use concord_telemetry::{AttrValue, TraceCarrier, TRACE_MISSING_CODE};
+use concord_telemetry::{AttrValue, TraceCarrier, CARRIER_DROPPED_CODE, TRACE_MISSING_CODE};
 use tracing::info_span;
 
 fn trace_id_of(carrier: &TraceCarrier) -> String {
@@ -151,4 +151,66 @@ fn proto_carrier_converts_both_ways() {
         concord_telemetry::proto::v1::TraceCarrier::decode(wire.encode_to_vec().as_slice())
             .expect("decode");
     assert_eq!(TraceCarrier::from(&decoded), plain);
+}
+
+fn dropped_headers(captured: &concord_telemetry::testing::Capture) -> Vec<AttrValue> {
+    captured
+        .errors_where(|e| e.code == CARRIER_DROPPED_CODE)
+        .into_iter()
+        .map(|e| e.fields.get("header").cloned().expect("header field"))
+        .collect()
+}
+
+#[test]
+fn malformed_traceparent_is_dropped_once_and_request_proceeds() {
+    let captured = capture_exclusive();
+    set_otel_active(true);
+    let bad = TraceCarrier {
+        traceparent: Some("not-a-traceparent".into()),
+        ..TraceCarrier::default()
+    };
+    let span = info_span!("a2-bad-ingress");
+    carrier::extract_ingress("test.ingress", &span, &bad);
+    let own = span.in_scope(carrier::capture);
+    assert!(own.traceparent.is_some(), "the request proceeds unparented");
+    assert_eq!(
+        dropped_headers(&captured),
+        vec![AttrValue::Str("traceparent".into())]
+    );
+
+    // On a required hop it is this record, not trace.missing.
+    drop(captured);
+    let captured2 = capture_exclusive();
+    let span = info_span!("a2-bad-required");
+    carrier::extract_required("test.hop", &span, &bad);
+    set_otel_active(false);
+    assert_eq!(
+        dropped_headers(&captured2),
+        vec![AttrValue::Str("traceparent".into())]
+    );
+    assert!(captured2
+        .errors_where(|e| e.code == TRACE_MISSING_CODE)
+        .is_empty());
+}
+
+#[test]
+fn oversize_tracestate_is_dropped_once() {
+    let captured = capture_exclusive();
+    set_otel_active(true);
+    let origin = info_span!("a2-ts-origin");
+    let mut sent = origin.in_scope(carrier::capture);
+    sent.tracestate = Some(format!("v={}", "x".repeat(300)));
+    let span = info_span!("a2-ts");
+    carrier::extract_required("test.hop", &span, &sent);
+    set_otel_active(false);
+    assert_eq!(
+        dropped_headers(&captured),
+        vec![AttrValue::Str("tracestate".into())]
+    );
+    let joined = span.in_scope(carrier::capture);
+    assert_eq!(trace_id_of(&joined), trace_id_of(&sent));
+    assert!(joined.tracestate.is_none());
+    assert!(captured
+        .errors_where(|e| e.code == TRACE_MISSING_CODE)
+        .is_empty());
 }

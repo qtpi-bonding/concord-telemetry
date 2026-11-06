@@ -22,7 +22,7 @@ pub mod proto {
     }
 }
 
-pub use carrier::{BAGGAGE_DROPPED_CODE, TRACE_MISSING_CODE};
+pub use carrier::{BAGGAGE_DROPPED_CODE, CARRIER_DROPPED_CODE, TRACE_MISSING_CODE};
 pub use concord_telemetry_proto::TraceCarrier;
 
 pub use concord_telemetry_derive::Event;

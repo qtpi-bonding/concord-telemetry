@@ -21,6 +21,12 @@ pub const TRACE_MISSING_CODE: &str = "concord.trace.missing";
 /// Code of the record emitted when baggage entries were dropped.
 pub const BAGGAGE_DROPPED_CODE: &str = "concord.trace.baggage_dropped";
 
+/// Code of the record emitted when an incoming `traceparent` is malformed or
+/// a `tracestate` is over its cap. The field `header` names which.
+pub const CARRIER_DROPPED_CODE: &str = "concord.trace.carrier_dropped";
+
+const TRACESTATE_MAX: usize = 256;
+
 static OTEL_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn set_otel_active(active: bool) {
@@ -97,6 +103,7 @@ pub fn parent_on(span: &Span, c: &TraceCarrier) {
 pub fn link_from(span: &Span, c: &TraceCarrier) {
     let context = extract_context(getter(c));
     let span_context = context.span().span_context().clone();
+    report_invalid(span, &getter(c), span_context.is_valid());
     if span_context.is_valid() {
         span.add_link(span_context);
     }
@@ -110,7 +117,8 @@ pub fn link_from(span: &Span, c: &TraceCarrier) {
 /// `hop`.
 pub fn extract_required(hop: &'static str, span: &Span, c: &TraceCarrier) {
     let valid = propagation::parent(span, getter(c));
-    if !valid && otel_active() {
+    let malformed = c.traceparent.as_deref().is_some_and(|v| !v.is_empty());
+    if !valid && !malformed && otel_active() {
         emit_trace_missing(hop);
     }
 }
@@ -140,8 +148,22 @@ pub mod context {
     }
 }
 
+/// Records, once each, an incoming `traceparent` that does not parse and a
+/// `tracestate` over its cap. Both are dropped and the request proceeds. A
+/// no-op where the span cannot hold baggage (no exporter).
+pub(crate) fn report_invalid(span: &Span, get: &impl Fn(&str) -> Option<String>, valid: bool) {
+    if !baggage::installed(span) {
+        return;
+    }
+    if !valid && get("traceparent").is_some_and(|v| !v.is_empty()) {
+        emit_carrier_dropped("traceparent");
+    }
+    if get("tracestate").is_some_and(|v| v.len() > TRACESTATE_MAX) {
+        emit_carrier_dropped("tracestate");
+    }
+}
+
 pub(crate) fn extract_context(get: impl Fn(&str) -> Option<String>) -> opentelemetry::Context {
-    const TRACESTATE_MAX: usize = 256;
     let mut fields = HashMap::new();
     if let Some(value) = get("traceparent") {
         fields.insert("traceparent".to_owned(), value);
@@ -193,5 +215,21 @@ pub(crate) fn emit_baggage_dropped(count: usize) {
         error.fingerprint = digest.as_str(),
         error.source = source,
         dropped = count as i64,
+    );
+}
+
+fn emit_carrier_dropped(header: &'static str) {
+    let class = ErrorClass::Logical;
+    let source = module_path!();
+    let digest = fingerprint(CARRIER_DROPPED_CODE, class, source);
+    tracing::event!(
+        name: "error",
+        target: EVENT_TARGET,
+        tracing::Level::WARN,
+        error.code = CARRIER_DROPPED_CODE,
+        error.class = class.as_str(),
+        error.fingerprint = digest.as_str(),
+        error.source = source,
+        header = header,
     );
 }
