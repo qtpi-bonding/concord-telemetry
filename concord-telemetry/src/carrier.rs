@@ -92,8 +92,10 @@ fn getter(c: &TraceCarrier) -> impl Fn(&str) -> Option<String> + '_ {
 }
 
 /// Makes `span` a child of the carrier's trace and takes its baggage. Call it
-/// before `span` is first entered. A carrier without a valid `traceparent`
-/// leaves the span's contextual parent in place.
+/// before anything else touches `span`'s OpenTelemetry context: before it is
+/// first entered, and before any `context::add` on it, since both fix the
+/// span's trace and a later `parent_on` is then ignored. A carrier without a
+/// valid `traceparent` leaves the span's contextual parent in place.
 pub fn parent_on(span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
 }
