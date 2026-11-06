@@ -67,7 +67,7 @@ impl TraceCarrier {
 
     /// Reads each header through `get`, which returns the value for a header
     /// name or `None` when it is absent.
-    pub fn from_pairs<'a>(get: impl Fn(&str) -> Option<String>) -> TraceCarrier {
+    pub fn from_pairs(get: impl Fn(&str) -> Option<String>) -> TraceCarrier {
         TraceCarrier {
             traceparent: get("traceparent"),
             tracestate: get("tracestate"),
