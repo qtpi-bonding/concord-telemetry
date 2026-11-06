@@ -1,5 +1,12 @@
 # concord-telemetry
 
+## concord-lint ratchet rules
+
+The lint tool reports `ratchet.result_string`, `ratchet.dropped_result`,
+`ratchet.error_to_string`, `ratchet.untraced_spawn`, and `ratchet.raw_channel`.
+These findings use the same counting baseline mechanism as the existing rules;
+test files and `#[cfg(test)]` modules are skipped.
+
 One `init`, domain events and coded error records on OpenTelemetry. A repo's
 binaries and its own internal crates (e.g. grorg's `ops`, which emits domain
 events after the write) may depend on it. Crates other repos depend on (proto

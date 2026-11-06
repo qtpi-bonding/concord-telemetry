@@ -17,5 +17,6 @@ fi
 if $SLOT cargo tree -p concord-telemetry -e normal -i rustls >/dev/null 2>&1; then
   echo "rustls is in concord-telemetry's default tree; it belongs behind the tls feature" >&2; exit 1
 fi
-# The lint passes on this repo itself.
-$SLOT cargo run -q -p concord-lint -- concord-telemetry/src concord-lint/src
+# The lint passes on this repo itself. lint-baseline.txt grandfathers the
+# ratchet findings that predate the ratchet rules; it may only shrink.
+$SLOT cargo run -q -p concord-lint -- --baseline lint-baseline.txt concord-telemetry/src concord-lint/src

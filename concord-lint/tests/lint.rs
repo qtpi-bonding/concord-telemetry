@@ -14,6 +14,83 @@ fn scan(name: &str, source: &str) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn ratchet_result_string_fires_and_result_error_does_not() {
+    assert_eq!(
+        scan("src/lib.rs", "fn bad() -> Result<(), String> { Ok(()) }"),
+        vec!["ratchet.result_string"]
+    );
+    assert!(scan("src/lib.rs", "fn good() -> Result<(), MyError> { todo!() }").is_empty());
+}
+
+#[test]
+fn ratchet_dropped_result_fires_and_handled_result_does_not() {
+    assert_eq!(
+        scan("src/lib.rs", "fn f() { let _ = work(); work().ok(); }"),
+        vec!["ratchet.dropped_result", "ratchet.dropped_result"]
+    );
+    assert!(scan("src/lib.rs", "fn f() { let value = work(); drop(value); }").is_empty());
+}
+
+#[test]
+fn ratchet_error_to_string_fires_and_error_display_does_not() {
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "fn f() { match work() { Err(e) => e.to_string(), Ok(_) => String::new() } }"
+        ),
+        vec!["ratchet.error_to_string"]
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "fn f() { match work() { Err(e) => format!(\"{e}\"), Ok(_) => String::new() } }"
+        ),
+        vec!["ratchet.error_to_string"]
+    );
+    assert!(scan(
+        "src/lib.rs",
+        "fn f() { match work() { Err(e) => log_error(e), Ok(_) => String::new() } } "
+    )
+    .is_empty());
+}
+
+#[test]
+fn ratchet_untraced_spawn_fires_and_instrumented_spawn_does_not() {
+    assert_eq!(
+        scan("src/lib.rs", "fn f() { tokio::spawn(fut); }"),
+        vec!["ratchet.untraced_spawn"]
+    );
+    assert!(scan(
+        "src/lib.rs",
+        "fn f() { tokio::spawn(fut.instrument(span)); tokio::spawn(fut.in_current_span()); }"
+    )
+    .is_empty());
+}
+
+#[test]
+fn ratchet_raw_channel_fires_and_wrapped_channel_does_not() {
+    assert_eq!(
+        scan("src/lib.rs", "fn f() { tokio::sync::mpsc::channel(8); }"),
+        vec!["ratchet.raw_channel"]
+    );
+    assert!(scan("src/lib.rs", "fn f() { concord_telemetry::channel(8); }").is_empty());
+}
+
+#[test]
+fn test_module_is_skipped() {
+    assert!(scan(
+        "src/lib.rs",
+        "#[cfg(test)] mod tests { fn f() -> Result<(), String> { let _ = work(); Ok(()) } }"
+    )
+    .is_empty());
+    assert!(scan(
+        "tests/example.rs",
+        "fn f() -> Result<(), String> { let _ = work(); Ok(()) }"
+    )
+    .is_empty());
+}
+
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_concord-lint"))
 }

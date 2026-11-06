@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use proc_macro2::{TokenStream, TokenTree};
+use quote::ToTokens;
 use syn::parse::Parser;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
@@ -45,6 +46,8 @@ struct Scanner<'a> {
     concord: Vec<String>,
     skip_registry: bool,
     binary: bool,
+    ratchet_skip: bool,
+    error_context: usize,
 }
 
 impl<'a> Scanner<'a> {
@@ -63,6 +66,8 @@ impl<'a> Scanner<'a> {
             concord: Vec::new(),
             skip_registry,
             binary,
+            ratchet_skip: skip_registry,
+            error_context: 0,
         }
     }
 
@@ -240,38 +245,67 @@ fn mentions_test(tokens: TokenStream) -> bool {
 impl<'ast> Visit<'ast> for Scanner<'_> {
     fn visit_item_mod(&mut self, item: &'ast ItemMod) {
         let old = self.skip_registry;
+        let old_ratchet = self.ratchet_skip;
         if self.visit_attrs(&item.attrs) {
             self.skip_registry = true;
+            self.ratchet_skip = true;
         }
         syn::visit::visit_item_mod(self, item);
         self.skip_registry = old;
+        self.ratchet_skip = old_ratchet;
     }
 
     fn visit_item_fn(&mut self, item: &'ast ItemFn) {
         let old = self.skip_registry;
+        let old_ratchet = self.ratchet_skip;
         if self.visit_attrs(&item.attrs) {
             self.skip_registry = true;
+            self.ratchet_skip = true;
+        }
+        if !self.ratchet_skip {
+            if let syn::ReturnType::Type(_, ty) = &item.sig.output {
+                if let syn::Type::Path(path) = &**ty {
+                    if path.path.segments.last().is_some_and(|s| s.ident == "Result")
+                        && path.path.segments.last().and_then(|s| match &s.arguments {
+                            syn::PathArguments::AngleBracketed(a) => a.args.first(), _ => None
+                        }).and_then(|arg| match arg {
+                            syn::GenericArgument::Type(_) => path.path.segments.last().and_then(|s| match &s.arguments {
+                                syn::PathArguments::AngleBracketed(a) => a.args.get(1), _ => None
+                            }),
+                            _ => None,
+                        }).is_some_and(|arg| matches!(arg, syn::GenericArgument::Type(syn::Type::Path(p)) if p.path.is_ident("String"))) {
+                        self.add_span(item.sig.ident.span(), "ratchet.result_string", "Result error type is String");
+                    }
+                }
+            }
         }
         syn::visit::visit_item_fn(self, item);
         self.skip_registry = old;
+        self.ratchet_skip = old_ratchet;
     }
 
     fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
         let old = self.skip_registry;
+        let old_ratchet = self.ratchet_skip;
         if self.visit_attrs(&item.attrs) {
             self.skip_registry = true;
+            self.ratchet_skip = true;
         }
         syn::visit::visit_impl_item_fn(self, item);
         self.skip_registry = old;
+        self.ratchet_skip = old_ratchet;
     }
 
     fn visit_item_impl(&mut self, item: &'ast ItemImpl) {
         let old = self.skip_registry;
+        let old_ratchet = self.ratchet_skip;
         if self.visit_attrs(&item.attrs) {
             self.skip_registry = true;
+            self.ratchet_skip = true;
         }
         syn::visit::visit_item_impl(self, item);
         self.skip_registry = old;
+        self.ratchet_skip = old_ratchet;
     }
 
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
@@ -284,10 +318,105 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
                 self.add_expr(&path.path, "process-exit", "process::exit");
             }
         }
+        if !self.ratchet_skip {
+            let path = match &*call.func {
+                Expr::Path(path) => quote_path(&path.path),
+                _ => String::new(),
+            };
+            if path == "tokio::spawn"
+                && call.args.first().is_some_and(|arg| {
+                    let text = arg.to_token_stream().to_string();
+                    !text.contains("instrument") && !text.contains("in_current_span")
+                })
+            {
+                self.add_span(
+                    call.func.span(),
+                    "ratchet.untraced_spawn",
+                    "tokio::spawn without tracing span",
+                );
+            } else if path == "tokio::sync::mpsc::channel"
+                || path == "tokio::sync::mpsc::unbounded_channel"
+            {
+                self.add_span(call.func.span(), "ratchet.raw_channel", "raw tokio channel");
+            }
+        }
         syn::visit::visit_expr_call(self, call);
     }
 
+    fn visit_local(&mut self, local: &'ast syn::Local) {
+        if !self.ratchet_skip && matches!(&local.pat, syn::Pat::Wild(_)) {
+            if let Some(init) = &local.init {
+                if matches!(&*init.expr, Expr::Call(_) | Expr::MethodCall(_)) {
+                    self.add_span(
+                        init.expr.span(),
+                        "ratchet.dropped_result",
+                        "result is discarded",
+                    );
+                }
+            }
+        }
+        syn::visit::visit_local(self, local);
+    }
+
+    fn visit_stmt(&mut self, stmt: &'ast syn::Stmt) {
+        if !self.ratchet_skip {
+            if let syn::Stmt::Expr(Expr::MethodCall(call), Some(_)) = stmt {
+                if call.method == "ok" && call.args.is_empty() {
+                    self.add_span(
+                        call.method.span(),
+                        "ratchet.dropped_result",
+                        "result is discarded",
+                    );
+                }
+            }
+        }
+        syn::visit::visit_stmt(self, stmt);
+    }
+
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if !self.ratchet_skip && self.error_context > 0 && call.method == "to_string" {
+            self.add_span(
+                call.method.span(),
+                "ratchet.error_to_string",
+                "error converted to string",
+            );
+        }
+        syn::visit::visit_expr_method_call(self, call);
+    }
+
+    fn visit_expr_match(&mut self, expr: &'ast syn::ExprMatch) {
+        for arm in &expr.arms {
+            let is_err = arm.pat.to_token_stream().to_string().starts_with("Err (");
+            if is_err {
+                self.error_context += 1;
+                self.visit_expr(&arm.body);
+                self.error_context -= 1;
+            } else {
+                self.visit_expr(&arm.body);
+            }
+        }
+    }
+
+    fn visit_expr_closure(&mut self, closure: &'ast syn::ExprClosure) {
+        let old = self.error_context;
+        if old == 0
+            && closure.inputs.len() == 1
+            && closure.inputs[0].to_token_stream().to_string() == "e"
+        {
+            self.error_context = 1;
+        }
+        syn::visit::visit_expr_closure(self, closure);
+        self.error_context = old;
+    }
+
     fn visit_macro(&mut self, mac: &'ast Macro) {
+        if !self.ratchet_skip && self.error_context > 0 && mac.path.is_ident("format") {
+            self.add_span(
+                mac.span(),
+                "ratchet.error_to_string",
+                "error formatted as string",
+            );
+        }
         if let Some((family, name)) = self.macro_family(&mac.path) {
             if family == "tracing" && (name == "span" || name.ends_with("_span")) {
                 return;
@@ -301,6 +430,15 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
 }
 
 impl Scanner<'_> {
+    fn add_span(&mut self, span: proc_macro2::Span, rule: &str, detail: &str) {
+        self.violations.push(Violation {
+            path: self.path.clone(),
+            line: span.start().line,
+            rule: rule.to_string(),
+            detail: detail.to_string(),
+        });
+    }
+
     fn add_expr(&mut self, path: &SynPath, rule: &str, detail: &str) {
         let line = path.span().start().line;
         self.violations.push(Violation {

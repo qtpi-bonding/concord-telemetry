@@ -1,0 +1,9 @@
+2	concord-lint/src/baseline.rs: ratchet.result_string: Result error type is String
+2	concord-lint/src/main.rs: ratchet.result_string: Result error type is String
+1	concord-lint/src/registry.rs: ratchet.result_string: Result error type is String
+1	concord-lint/src/scan.rs: ratchet.result_string: Result error type is String
+1	concord-telemetry/src/deadline.rs: ratchet.dropped_result: result is discarded
+4	concord-telemetry/src/init.rs: ratchet.dropped_result: result is discarded
+2	concord-telemetry/src/panic.rs: ratchet.dropped_result: result is discarded
+1	concord-telemetry/src/propagation.rs: ratchet.dropped_result: result is discarded
+1	concord-telemetry/src/testing.rs: ratchet.dropped_result: result is discarded
