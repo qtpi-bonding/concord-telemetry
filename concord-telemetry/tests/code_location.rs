@@ -67,3 +67,14 @@ fn event_and_error_records_carry_the_callers_location() {
     assert_eq!(errors.len(), 1);
     assert_location(&errors[0], error_line);
 }
+
+#[test]
+fn a_plain_tracing_record_carries_the_three_keys_too() {
+    // capture() only passes EVENT_TARGET records, so log one on that target.
+    let captured = concord_telemetry::testing::capture_exclusive();
+    let line = line!() + 1;
+    tracing::warn!(name: "plain-warn", target: concord_telemetry::EVENT_TARGET, "plain");
+    let found = captured.attrs_for("plain-warn");
+    assert_eq!(found.len(), 1);
+    assert_location(&found[0], line);
+}

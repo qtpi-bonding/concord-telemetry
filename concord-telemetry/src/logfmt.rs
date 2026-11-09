@@ -244,13 +244,13 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
                 }
             };
             if let Some(file) = location.file {
-                add("code.file.path", AnyValue::from(file));
+                add("code.file.path", AnyValue::from(file.into_owned()));
             }
             if let Some(line) = location.line {
                 add("code.line.number", AnyValue::from(i64::from(line)));
             }
             if let Some(module) = location.module {
-                add("code.module.name", AnyValue::from(module));
+                add("code.module.name", AnyValue::from(module.into_owned()));
             }
         }
         self.0.emit(record, instrumentation);

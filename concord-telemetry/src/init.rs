@@ -145,6 +145,9 @@ fn percent_decode(value: &str) -> Option<String> {
     while i < bytes.len() {
         if bytes[i] == b'%' {
             let hex = value.get(i + 1..i + 3)?;
+            if hex.len() != 2 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
             out.push(u8::from_str_radix(hex, 16).ok()?);
             i += 3;
         } else {
@@ -189,9 +192,7 @@ fn hostname() -> Option<String> {
     }
     #[cfg(not(unix))]
     {
-        std::env::var("COMPUTERNAME")
-            .ok()
-            .filter(|name| !name.is_empty())
+        None
     }
 }
 
@@ -213,6 +214,7 @@ fn resource_with(config: &Config, env: Option<&str>, host: Option<String>) -> Re
             .rev()
             .find(|(name, _)| name == key)
             .map(|(_, value)| value.clone())
+            .filter(|value| !value.is_empty())
     };
     let mut attributes = vec![
         KeyValue::new("service.name", config.service_name),
@@ -493,6 +495,23 @@ mod resource_tests {
     }
 
     #[test]
+    fn percent_escapes_need_exactly_two_hex_digits() {
+        let resource = resource_with(&config(), Some("a=%+1,b=%-1,c=%41,d=%4"), None);
+        assert_eq!(get(&resource, "a"), None);
+        assert_eq!(get(&resource, "b"), None);
+        assert_eq!(get(&resource, "c").as_deref(), Some("A"));
+        assert_eq!(get(&resource, "d"), None);
+    }
+
+    #[test]
+    fn empty_service_version_keeps_the_config_value() {
+        let resource = resource_with(&config(), Some("service.version="), Some("m".into()));
+        assert_eq!(get(&resource, "service.version").as_deref(), Some("1.2.3"));
+        let resource = resource_with(&config(), Some("host.name="), Some("m".into()));
+        assert_eq!(get(&resource, "host.name").as_deref(), Some("m"));
+    }
+
+    #[test]
     fn identity_and_principal_keys_are_not_settable_from_env() {
         let resource = resource_with(
             &config(),
@@ -505,6 +524,7 @@ mod resource_tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn real_hostname_is_nonempty() {
         assert!(hostname().is_some_and(|name| !name.is_empty()));
     }

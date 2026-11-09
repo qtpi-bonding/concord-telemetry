@@ -15,15 +15,23 @@ pub(crate) fn install(logs: Option<SdkLoggerProvider>, traces: Option<SdkTracerP
             .unwrap_or("unknown");
         let class = ErrorClass::Unknown;
         let digest = fingerprint(PANIC_CODE, class, source);
-        tracing::event!(
-            name: "error",
-            target: EVENT_TARGET,
-            tracing::Level::ERROR,
-            error.code = PANIC_CODE,
-            error.class = class.as_str(),
-            error.fingerprint = digest.as_str(),
-            error.source = source,
-        );
+        let emit = || {
+            tracing::event!(
+                    name: "error",
+                target: EVENT_TARGET,
+                tracing::Level::ERROR,
+                error.code = PANIC_CODE,
+                error.class = class.as_str(),
+                error.fingerprint = digest.as_str(),
+                error.source = source,
+            );
+        };
+        match info.location() {
+            Some(location) => {
+                crate::location::emit_at_owned(location.file(), location.line(), emit)
+            }
+            None => emit(),
+        }
 
         let log_provider = logs.clone();
         let trace_provider = traces.clone();

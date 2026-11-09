@@ -30,16 +30,16 @@ pub trait Event: Sized {
 
 /// Emits a domain event, recording the macro's call site as the record's code
 /// location. The argument is evaluated first, outside any closure, so `.await`
-/// and `?` work inside it.
+/// and `?` work inside it, and only borrowed, so the event stays usable.
 #[macro_export]
 macro_rules! event {
     ($ev:expr) => {{
-        let event = $ev;
+        let event = &$ev;
         $crate::__private::emit_at(
             ::core::file!(),
             ::core::line!(),
             ::core::module_path!(),
-            || $crate::Event::emit(&event),
+            || $crate::Event::emit(event),
         );
     }};
 }
