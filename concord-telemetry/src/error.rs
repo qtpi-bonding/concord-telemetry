@@ -77,7 +77,42 @@ pub fn chain_anyhow(error: &anyhow::Error) -> Vec<coded_error::ChainLink> {
     coded_error::chain_anyhow(error)
 }
 
+/// Cap on the text of one error record: `error.message` and the serialized
+/// `error.chain` each stay within half of it, 8192 bytes together.
+pub const ERROR_TEXT_MAX: usize = 8192;
+const TRUNCATED: &str = "...[truncated]";
+
+/// `text` cut to at most `max` bytes on a character boundary, ending in a
+/// visible marker when anything was cut.
+fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut end = max.saturating_sub(TRUNCATED.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = text[..end].to_owned();
+    out.push_str(&TRUNCATED[..TRUNCATED.len().min(max)]);
+    out
+}
+
+fn links_json(links: &[coded_error::ChainLink], mode: ErrorText, cap: usize) -> String {
+    serde_json::to_string(&links.iter().map(|link| {
+        let mut value = serde_json::json!({
+            "code": link.code, "class": link.class.map(|class| class.as_str()),
+            "type": link.type_name,
+            "origin": match link.origin { coded_error::Origin::Own => "own", coded_error::Origin::External => "external" },
+        });
+        if matches!(mode, ErrorText::Full) || link.origin == coded_error::Origin::Own {
+            value["message"] = serde_json::Value::String(truncate(&link.message, cap));
+        }
+        value
+    }).collect::<Vec<_>>()).expect("error chain is serializable")
+}
+
 pub fn chain_json(links: &[coded_error::ChainLink], mode: ErrorText) -> (String, Option<String>) {
+    let half = ERROR_TEXT_MAX / 2;
     let message = links
         .iter()
         .find(|link| link.origin == coded_error::Origin::Own)
@@ -88,18 +123,16 @@ pub fn chain_json(links: &[coded_error::ChainLink], mode: ErrorText) -> (String,
                 None
             }
         })
-        .map(|link| link.message.clone());
-    let json = serde_json::to_string(&links.iter().map(|link| {
-        let mut value = serde_json::json!({
-            "code": link.code, "class": link.class.map(|class| class.as_str()),
-            "type": link.type_name,
-            "origin": match link.origin { coded_error::Origin::Own => "own", coded_error::Origin::External => "external" },
-        });
-        if matches!(mode, ErrorText::Full) || link.origin == coded_error::Origin::Own {
-            value["message"] = serde_json::Value::String(link.message.clone());
-        }
-        value
-    }).collect::<Vec<_>>()).expect("error chain is serializable");
+        .map(|link| truncate(&link.message, half));
+    // Shrink the per-link text until the whole chain fits; codes, classes and
+    // types are never cut, so a chain whose metadata alone is over the cap
+    // is kept as is.
+    let mut cap = half;
+    let mut json = links_json(links, mode, cap);
+    while json.len() > half && cap > 0 {
+        cap /= 2;
+        json = links_json(links, mode, cap);
+    }
     (json, message)
 }
 
@@ -158,4 +191,57 @@ macro_rules! __emit_error {
             $($($fields)*)?
         );
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn link(origin: coded_error::Origin, message: String) -> coded_error::ChainLink {
+        coded_error::ChainLink {
+            code: Some("test.code"),
+            class: Some(coded_error::ErrorClass::Logical),
+            type_name: Some("T"),
+            origin,
+            message,
+        }
+    }
+
+    #[test]
+    fn short_text_is_untouched() {
+        let links = [link(coded_error::Origin::Own, "short".into())];
+        let (json, message) = chain_json(&links, ErrorText::Full);
+        assert_eq!(message.as_deref(), Some("short"));
+        assert!(json.contains("\"message\":\"short\""));
+    }
+
+    #[test]
+    fn long_text_is_cut_on_a_char_boundary_with_a_marker() {
+        // 3-byte characters, so a cut at an arbitrary byte lands mid-character.
+        let long = "\u{20ac}".repeat(10_000);
+        let links = [
+            link(coded_error::Origin::Own, long.clone()),
+            link(coded_error::Origin::External, long),
+        ];
+        let (json, message) = chain_json(&links, ErrorText::Full);
+        let message = message.unwrap();
+        assert!(message.len() <= ERROR_TEXT_MAX / 2);
+        assert!(message.ends_with(TRUNCATED));
+        assert!(json.len() <= ERROR_TEXT_MAX / 2, "{}", json.len());
+        assert!(json.len() + message.len() <= ERROR_TEXT_MAX);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        for entry in parsed.as_array().unwrap() {
+            assert_eq!(entry["code"], "test.code");
+            assert_eq!(entry["class"], "logical");
+            assert!(entry["message"].as_str().unwrap().ends_with(TRUNCATED));
+        }
+    }
+
+    #[test]
+    fn truncate_never_exceeds_max() {
+        for max in [0, 1, 5, 14, 15, 40] {
+            let out = truncate(&"\u{20ac}".repeat(100), max);
+            assert!(out.len() <= max, "{max}: {}", out.len());
+        }
+    }
 }

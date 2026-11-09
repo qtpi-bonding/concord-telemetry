@@ -80,6 +80,21 @@ pub fn set_parent_from_env(span: &tracing::Span) {
     });
 }
 
+/// The environment variables a child process needs to continue `carrier`'s
+/// trace and baggage: `TRACEPARENT` and `BAGGAGE`, each only when set. The
+/// counterpart of `set_parent_from_env`, which reads exactly these two;
+/// `tracestate` is not carried this way, so it is not yielded.
+pub fn inject_env(
+    carrier: &concord_telemetry_proto::TraceCarrier,
+) -> impl Iterator<Item = (String, String)> {
+    [
+        (TRACEPARENT_ENV, carrier.traceparent.clone()),
+        (BAGGAGE_ENV, carrier.baggage.clone()),
+    ]
+    .into_iter()
+    .filter_map(|(name, value)| Some((name.to_owned(), value.filter(|value| !value.is_empty())?)))
+}
+
 struct Carrier<'a>(&'a mut HashMap<String, String>);
 
 impl Injector for Carrier<'_> {

@@ -66,6 +66,14 @@ Log records also carry `code.file.path`, `code.line.number` and
 `error_anyhow!` they are the macro call site; for `event!` too (not the event
 type's definition). An event field of the same name wins.
 
+### Version
+
+Pass `concord_telemetry::version!()` as `Config`'s `service_version`. It expands
+in your crate to the `CONCORD_GIT_SHA` build-time variable when set and
+non-empty, else `CARGO_PKG_VERSION`, so a build that sets
+`CONCORD_GIT_SHA=<commit>` reports its own commit. A run-time
+`OTEL_RESOURCE_ATTRIBUTES=service.version=...` still wins.
+
 ## Trace-aware boundaries
 
 The optional `channel` feature provides `channel::traced` and
@@ -139,7 +147,10 @@ string), `.via`; its serde JSON uses `verifiedBy` (pbjson-compatible).
 `concord_telemetry::error!(&err, rpc.method = %m)` and
 `error_anyhow!(&err, source = X::NAME)` (without `source`, the source is the calling module path, as with `error!`) record `error.code`, `error.class`,
 `error.fingerprint`, `error.source` and your fields, never the error's Display
-text. A panic is recorded as `concord.process.panic` (class unknown, source the
+text. `error.message` and each chain link's text are cut to fit 8192 bytes together
+(`error.message` at most 4096, the serialized `error.chain` at most 4096), on a
+character boundary, ending in `...[truncated]`; codes, classes and
+fingerprints are never cut. A panic is recorded as `concord.process.panic` (class unknown, source the
 panic location).
 
 ## Trace context
@@ -156,7 +167,8 @@ The server span covers a handler up to its response. Items of a streaming
 response are produced outside it and carry no trace id. For other carriers,
 such as NATS headers, `concord_telemetry::propagation` has `inject`,
 `set_parent` and `traceparent`. Hooks and CLIs pass `TRACEPARENT` and
-`BAGGAGE` (`set_parent_from_env`); `tracestate` is not carried that way. A crate that
+`BAGGAGE` (`set_parent_from_env`); `tracestate` is not carried that way. A parent that spawns a child sets
+`propagation::inject_env(&carrier)`'s pairs on the child's environment. A crate that
 spawns processes but must stay free of OpenTelemetry takes the variable's
 name from `concord_telemetry_proto::TRACEPARENT_ENV`. Without an
 exporter there are no trace ids and nothing is sent. The `grpc.server` and
