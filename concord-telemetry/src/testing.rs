@@ -185,7 +185,9 @@ pub fn layer<S>() -> impl Layer<S>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
 {
-    EventsOnly(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider()))
+    EventsOnly(BaggageBridge(
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider()),
+    ))
 }
 
 impl Capture {
@@ -238,6 +240,15 @@ impl Capture {
             .filter(|log| log.event_name() == Some("error"))
             .filter_map(|log| error_record(log.attributes_iter()))
             .filter(predicate)
+            .collect()
+    }
+
+    #[doc(hidden)]
+    pub fn attrs_for(&self, event_name: &'static str) -> Vec<Attrs> {
+        self.records()
+            .into_iter()
+            .filter(|log| log.event_name() == Some(event_name))
+            .map(|log| attrs(log.attributes_iter()))
             .collect()
     }
 

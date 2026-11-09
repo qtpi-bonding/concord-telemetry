@@ -46,6 +46,26 @@ Plain HTTP by default with no TLS stack in the tree. HTTPS to the collector is
 behind the optional `tls` feature (reqwest's rustls, aws-lc-rs). TLS is an ops
 concern; prefer a tailnet or a Caddy in front.
 
+### Resource attributes
+
+Every exported log record and span carries the resource `service.name` and
+`service.version` (from `Config`), a generated `service.instance.id`, `host.name`
+(the machine hostname) and, when `Config::principal` is set, `principal.kind`,
+`principal.id`, `principal.verified_by` and `principal.via`.
+
+`OTEL_RESOURCE_ATTRIBUTES` (`k1=v1,k2=v2`, values percent-encoded) is merged in.
+Its `service.version` replaces `Config::service_version`, so a deployment can
+set the git commit without a code change, and its `host.name` replaces the
+detected hostname. `service.name`, `service.instance.id` and `principal.*` in
+it are ignored, and `OTEL_SERVICE_NAME` is not read: the service's identity is
+the caller's. A malformed entry (no `=`, empty key, bad percent escape) is
+skipped and the others still apply.
+
+Log records also carry `code.file.path`, `code.line.number` and
+`code.module.name`, the same keys spans carry. For `error!` and
+`error_anyhow!` they are the macro call site; for `event!` too (not the event
+type's definition). An event field of the same name wins.
+
 ## Trace-aware boundaries
 
 The optional `channel` feature provides `channel::traced` and

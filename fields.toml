@@ -28,6 +28,9 @@ source_record_id = { type = "str", meaning = "Id of the record an event describe
 "error.type" = { type = "str", meaning = "OTel semconv: error type" }
 "rpc.method" = { type = "str", meaning = "OTel semconv: RPC method" }
 "http.request.method" = { type = "str", meaning = "OTel semconv: HTTP method" }
+"code.file.path" = { type = "str", meaning = "OTel semconv: source file; added to every exported log record and span, never set by hand" }
+"code.line.number" = { type = "int", meaning = "OTel semconv: source line; added to every exported log record and span, never set by hand" }
+"code.module.name" = { type = "str", meaning = "OTel semconv: module path; added to every exported log record and span, never set by hand" }
 
 [never]
 names = ["content", "body", "stdout", "stderr", "prompt", "env", "password", "token", "secret"]

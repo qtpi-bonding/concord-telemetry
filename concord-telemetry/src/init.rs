@@ -130,10 +130,96 @@ fn directive(target: &str, level: LevelFilter) -> Directive {
         .expect("a target and level always form a directive")
 }
 
+/// Resource keys the environment cannot set: the service's identity is the
+/// caller's, the instance id is generated, and principals come from `Config`.
+fn reserved(key: &str) -> bool {
+    key == "service.name" || key == "service.instance.id" || key.starts_with("principal.")
+}
+
+/// Percent-decodes an `OTEL_RESOURCE_ATTRIBUTES` value; `None` on a malformed
+/// escape or bytes that are not UTF-8.
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = value.get(i + 1..i + 3)?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// Parses `OTEL_RESOURCE_ATTRIBUTES` (`k1=v1,k2=v2`, values percent-encoded).
+/// An entry that is malformed (no `=`, empty key, bad escape) or reserved is
+/// skipped; the rest still apply.
+fn env_attributes(raw: &str) -> Vec<(String, String)> {
+    raw.split(',')
+        .filter_map(|entry| {
+            let (key, value) = entry.split_once('=')?;
+            let key = key.trim();
+            if key.is_empty() || reserved(key) {
+                return None;
+            }
+            Some((key.to_owned(), percent_decode(value.trim())?))
+        })
+        .collect()
+}
+
+/// The machine's hostname, if it can be read.
+fn hostname() -> Option<String> {
+    #[cfg(unix)]
+    {
+        let mut buf = [0u8; 256];
+        // SAFETY: the buffer is valid for `buf.len()` bytes; gethostname writes
+        // at most that many and we only read up to the first NUL.
+        let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+        if rc == 0 {
+            let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+            return String::from_utf8(buf[..end].to_vec())
+                .ok()
+                .filter(|name| !name.is_empty());
+        }
+        None
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::var("COMPUTERNAME")
+            .ok()
+            .filter(|name| !name.is_empty())
+    }
+}
+
 fn resource(config: &Config) -> Resource {
+    resource_with(
+        config,
+        std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
+        hostname(),
+    )
+}
+
+/// `service.version` from `OTEL_RESOURCE_ATTRIBUTES` overrides
+/// `Config::service_version`; `host.name` is the machine hostname unless the
+/// environment sets it. Other environment attributes are added as they come.
+fn resource_with(config: &Config, env: Option<&str>, host: Option<String>) -> Resource {
+    let env = env.map(env_attributes).unwrap_or_default();
+    let from_env = |key: &str| {
+        env.iter()
+            .rev()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.clone())
+    };
     let mut attributes = vec![
         KeyValue::new("service.name", config.service_name),
-        KeyValue::new("service.version", config.service_version),
+        KeyValue::new(
+            "service.version",
+            from_env("service.version").unwrap_or_else(|| config.service_version.to_owned()),
+        ),
         KeyValue::new(
             "service.instance.id",
             format!(
@@ -144,6 +230,21 @@ fn resource(config: &Config) -> Resource {
             ),
         ),
     ];
+    if let Some(host) = from_env("host.name").or(host) {
+        attributes.push(KeyValue::new("host.name", host));
+    }
+    let mut extra: Vec<(String, String)> = Vec::new();
+    for (key, value) in &env {
+        if key != "service.version" && key != "host.name" {
+            extra.retain(|(name, _)| name != key);
+            extra.push((key.clone(), value.clone()));
+        }
+    }
+    attributes.extend(
+        extra
+            .into_iter()
+            .map(|(key, value)| KeyValue::new(key, value)),
+    );
     if let Some(principal) = &config.principal {
         let kind = PrincipalKind::try_from(principal.kind)
             .unwrap_or(PrincipalKind::Unspecified)
@@ -331,5 +432,80 @@ mod tests {
         assert!(emitted
             .iter()
             .any(|log| log.record.target().map(|target| target.as_ref()) == Some("application")));
+    }
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+    use opentelemetry::Key;
+
+    fn get(resource: &Resource, key: &str) -> Option<String> {
+        resource
+            .get(&Key::new(key.to_owned()))
+            .map(|value| value.to_string())
+    }
+
+    fn config() -> Config {
+        Config::new("svc", "1.2.3")
+    }
+
+    #[test]
+    fn env_values_merge_and_service_version_overrides() {
+        let resource = resource_with(
+            &config(),
+            Some("service.version=abc123,deployment.environment=prod%2Fblue,host.name=box"),
+            Some("machine".into()),
+        );
+        assert_eq!(get(&resource, "service.version").as_deref(), Some("abc123"));
+        assert_eq!(
+            get(&resource, "deployment.environment").as_deref(),
+            Some("prod/blue")
+        );
+        assert_eq!(get(&resource, "host.name").as_deref(), Some("box"));
+        assert_eq!(get(&resource, "service.name").as_deref(), Some("svc"));
+        assert!(get(&resource, "service.instance.id").is_some());
+    }
+
+    #[test]
+    fn env_unset_keeps_config_values_and_adds_host_name() {
+        let resource = resource_with(&config(), None, Some("machine".into()));
+        assert_eq!(get(&resource, "service.version").as_deref(), Some("1.2.3"));
+        assert_eq!(get(&resource, "host.name").as_deref(), Some("machine"));
+        assert_eq!(get(&resource, "service.name").as_deref(), Some("svc"));
+        assert_eq!(resource.len(), 4);
+    }
+
+    #[test]
+    fn malformed_entries_are_skipped_not_fatal() {
+        let resource = resource_with(
+            &config(),
+            Some("novalue,=nokey,bad=%zz,bad2=%4,bad3=%ff,,good=yes, spaced = v "),
+            None,
+        );
+        assert_eq!(get(&resource, "good").as_deref(), Some("yes"));
+        assert_eq!(get(&resource, "spaced").as_deref(), Some("v"));
+        for key in ["novalue", "bad", "bad2", "bad3", ""] {
+            assert_eq!(get(&resource, key), None, "{key}");
+        }
+        assert_eq!(get(&resource, "service.version").as_deref(), Some("1.2.3"));
+        assert_eq!(get(&resource, "host.name"), None);
+    }
+
+    #[test]
+    fn identity_and_principal_keys_are_not_settable_from_env() {
+        let resource = resource_with(
+            &config(),
+            Some("service.name=evil,service.instance.id=x,principal.id=y"),
+            None,
+        );
+        assert_eq!(get(&resource, "service.name").as_deref(), Some("svc"));
+        assert_ne!(get(&resource, "service.instance.id").as_deref(), Some("x"));
+        assert_eq!(get(&resource, "principal.id"), None);
+    }
+
+    #[test]
+    fn real_hostname_is_nonempty() {
+        assert!(hostname().is_some_and(|name| !name.is_empty()));
     }
 }

@@ -9,7 +9,8 @@
 //! Exported records: the OpenTelemetry bridge builds and emits its record
 //! itself, so `BaggageBridge` attaches the span's baggage to the current
 //! `Context` around the bridge, and `BaggageLogProcessor` copies that baggage
-//! into the record's attributes on its way to the real processor.
+//! into the record's attributes on its way to the real processor. The same
+//! two add the code location (see `location`).
 
 use crate::baggage::BaggageMap;
 use opentelemetry::baggage::BaggageExt;
@@ -197,16 +198,18 @@ where
                 .map(|map| map.0.clone())
         });
         // The extensions lock is released before the bridge runs.
-        match entries.filter(|entries| !entries.is_empty()) {
-            Some(entries) => {
-                let baggage = entries
-                    .into_iter()
-                    .map(|(key, value)| KeyValue::new(key, value));
-                let _guard = Context::current().with_baggage(baggage).attach();
-                self.0.on_event(event, ctx);
+        crate::location::with_event_location(event.metadata(), || {
+            match entries.filter(|entries| !entries.is_empty()) {
+                Some(entries) => {
+                    let baggage = entries
+                        .into_iter()
+                        .map(|(key, value)| KeyValue::new(key, value));
+                    let _guard = Context::current().with_baggage(baggage).attach();
+                    self.0.on_event(event, ctx);
+                }
+                None => self.0.on_event(event, ctx),
             }
-            None => self.0.on_event(event, ctx),
-        }
+        });
     }
 }
 
@@ -232,6 +235,22 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
             // The event's own field of the same name wins.
             if !record.attributes_iter().any(|(own, _)| *own == key) {
                 record.add_attribute(key, AnyValue::from(value));
+            }
+        }
+        if let Some(location) = crate::location::current() {
+            let mut add = |key: &'static str, value: AnyValue| {
+                if !record.attributes_iter().any(|(own, _)| own.as_str() == key) {
+                    record.add_attribute(key, value);
+                }
+            };
+            if let Some(file) = location.file {
+                add("code.file.path", AnyValue::from(file));
+            }
+            if let Some(line) = location.line {
+                add("code.line.number", AnyValue::from(i64::from(line)));
+            }
+            if let Some(module) = location.module {
+                add("code.module.name", AnyValue::from(module));
             }
         }
         self.0.emit(record, instrumentation);

@@ -4,6 +4,7 @@ mod deadline;
 pub mod error;
 mod event;
 mod init;
+mod location;
 mod logfmt;
 mod panic;
 mod principal;
@@ -41,6 +42,7 @@ pub use principal::{Principal, PrincipalKind, Verification};
 #[doc(hidden)]
 pub mod __private {
     pub use crate::error;
+    pub use crate::location::emit_at;
     pub use coded_error;
     pub use opentelemetry;
     pub use prost_types;
