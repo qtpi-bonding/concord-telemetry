@@ -30,6 +30,19 @@ pub const TRACEPARENT_ENV: &str = "TRACEPARENT";
 /// The environment variable that carries W3C `baggage` into a hook or CLI.
 pub const BAGGAGE_ENV: &str = "BAGGAGE";
 
+/// The environment variables a child process needs to continue `carrier`'s
+/// trace and baggage: `TRACEPARENT` and `BAGGAGE`, each only when set and
+/// non-empty. `tracestate` is not carried this way, so it is not yielded.
+/// `concord_telemetry::propagation::set_parent_from_env` reads exactly these.
+pub fn inject_env(carrier: &TraceCarrier) -> impl Iterator<Item = (String, String)> {
+    [
+        (TRACEPARENT_ENV, carrier.traceparent.clone()),
+        (BAGGAGE_ENV, carrier.baggage.clone()),
+    ]
+    .into_iter()
+    .filter_map(|(name, value)| Some((name.to_owned(), value.filter(|value| !value.is_empty())?)))
+}
+
 /// The text of `principal.proto`.
 pub const PRINCIPAL_PROTO: &str = include_str!("../proto/concord_telemetry/v1/principal.proto");
 
@@ -107,6 +120,31 @@ mod tests {
                 .map(|(_, v)| v.clone())
         });
         assert_eq!(rebuilt, carrier);
+    }
+
+    #[test]
+    fn inject_env_yields_traceparent_and_baggage_only() {
+        let carrier = TraceCarrier {
+            traceparent: Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".into()),
+            tracestate: Some("vendor=abc".into()),
+            baggage: Some("concord.principal=alice".into()),
+        };
+        let vars: Vec<_> = inject_env(&carrier).collect();
+        assert_eq!(
+            vars,
+            vec![
+                (
+                    TRACEPARENT_ENV.to_owned(),
+                    carrier.traceparent.clone().unwrap()
+                ),
+                (BAGGAGE_ENV.to_owned(), "concord.principal=alice".to_owned()),
+            ]
+        );
+        let empty = TraceCarrier {
+            traceparent: Some(String::new()),
+            ..Default::default()
+        };
+        assert_eq!(inject_env(&empty).count(), 0);
     }
 
     #[test]
