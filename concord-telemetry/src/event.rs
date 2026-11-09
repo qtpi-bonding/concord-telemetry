@@ -68,3 +68,43 @@ macro_rules! version {
         }
     };
 }
+
+/// The caller's `CONCORD_GIT_REPO` build-time environment variable (the repo
+/// the binary is built from, e.g. `grorg`), else the empty string. Read when
+/// the *caller's* crate compiles.
+#[macro_export]
+macro_rules! repo {
+    () => {
+        $crate::repo!(@pick ::core::option_env!("CONCORD_GIT_REPO"))
+    };
+    (@pick $repo:expr) => {
+        match $repo {
+            ::core::option::Option::Some(repo) => repo,
+            ::core::option::Option::None => "",
+        }
+    };
+}
+
+/// A [`BuildInfo`](crate::BuildInfo) from the caller's build environment:
+/// `repo!()` and the caller's `CONCORD_GIT_SHA` (empty when unset). Pass it
+/// to `Config::with_build_info` so every record's resource says which
+/// repository and commit the binary came from (`vcs.repository.name`,
+/// `vcs.ref.head.revision`).
+///
+/// ```
+/// let config = concord_telemetry::Config::new("svc", concord_telemetry::version!())
+///     .with_build_info(concord_telemetry::build_info!());
+/// # let _ = config;
+/// ```
+#[macro_export]
+macro_rules! build_info {
+    () => {
+        $crate::BuildInfo {
+            repository: $crate::repo!(),
+            revision: match ::core::option_env!("CONCORD_GIT_SHA") {
+                ::core::option::Option::Some(sha) => sha,
+                ::core::option::Option::None => "",
+            },
+        }
+    };
+}

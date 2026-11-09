@@ -74,6 +74,18 @@ non-empty, else `CARGO_PKG_VERSION`, so a build that sets
 `CONCORD_GIT_SHA=<commit>` reports its own commit. A run-time
 `OTEL_RESOURCE_ATTRIBUTES=service.version=...` still wins.
 
+### Build info
+
+`Config::new(name, version!()).with_build_info(build_info!())` adds the
+resource attributes `vcs.repository.name` (from `CONCORD_GIT_REPO`) and
+`vcs.ref.head.revision` (from `CONCORD_GIT_SHA`), so telemetry can be joined to
+a code graph on repository, commit, repo-relative `code.file.path` and
+`code.line.number`. `repo!()` alone is the repository name. Both variables are
+read at build time of each binary's own crate (`CONCORD_GIT_REPO=grorg
+CONCORD_GIT_SHA=$(git rev-parse HEAD) cargo build`); unset or empty, the
+attribute is omitted. `OTEL_RESOURCE_ATTRIBUTES` may override either at run
+time; empty values there are ignored.
+
 ## Trace-aware boundaries
 
 The optional `channel` feature provides `channel::traced` and

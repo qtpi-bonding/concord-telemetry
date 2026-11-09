@@ -28,9 +28,29 @@ pub struct Config {
     pub principal: Option<Principal>,
     pub local: LocalOutput,
     pub flush_deadline: Duration,
+    /// Where the binary was built from; see [`BuildInfo`] and
+    /// [`Config::with_build_info`].
+    pub build: BuildInfo,
+}
+
+/// The repository and commit a binary was built from, taken from the build
+/// environment of the caller's crate (see `build_info!`). Empty means unknown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BuildInfo {
+    /// `CONCORD_GIT_REPO` at build time: the resource's `vcs.repository.name`.
+    pub repository: &'static str,
+    /// `CONCORD_GIT_SHA` at build time: the resource's `vcs.ref.head.revision`.
+    pub revision: &'static str,
 }
 
 impl Config {
+    /// Records where the binary was built from: `Config::new(name,
+    /// version!()).with_build_info(build_info!())`. Empty fields are omitted.
+    pub fn with_build_info(mut self, build: BuildInfo) -> Self {
+        self.build = build;
+        self
+    }
+
     pub fn new(service_name: &'static str, service_version: &'static str) -> Self {
         Self {
             service_name,
@@ -38,6 +58,7 @@ impl Config {
             principal: None,
             local: LocalOutput::Text,
             flush_deadline: Duration::from_secs(2),
+            build: BuildInfo::default(),
         }
     }
 }
@@ -235,9 +256,23 @@ fn resource_with(config: &Config, env: Option<&str>, host: Option<String>) -> Re
     if let Some(host) = from_env("host.name").or(host) {
         attributes.push(KeyValue::new("host.name", host));
     }
+    let non_empty = |value: &str| (!value.is_empty()).then(|| value.to_owned());
+    if let Some(repository) =
+        from_env("vcs.repository.name").or_else(|| non_empty(config.build.repository))
+    {
+        attributes.push(KeyValue::new("vcs.repository.name", repository));
+    }
+    if let Some(revision) =
+        from_env("vcs.ref.head.revision").or_else(|| non_empty(config.build.revision))
+    {
+        attributes.push(KeyValue::new("vcs.ref.head.revision", revision));
+    }
     let mut extra: Vec<(String, String)> = Vec::new();
     for (key, value) in &env {
-        if key != "service.version" && key != "host.name" {
+        if !matches!(
+            key.as_str(),
+            "service.version" | "host.name" | "vcs.repository.name" | "vcs.ref.head.revision"
+        ) {
             extra.retain(|(name, _)| name != key);
             extra.push((key.clone(), value.clone()));
         }
@@ -492,6 +527,52 @@ mod resource_tests {
         }
         assert_eq!(get(&resource, "service.version").as_deref(), Some("1.2.3"));
         assert_eq!(get(&resource, "host.name"), None);
+    }
+
+    #[test]
+    fn build_info_sets_vcs_keys_unless_empty_and_env_overrides() {
+        let built = config().with_build_info(BuildInfo {
+            repository: "grorg",
+            revision: "abc123",
+        });
+        let resource = resource_with(&built, None, None);
+        assert_eq!(
+            get(&resource, "vcs.repository.name").as_deref(),
+            Some("grorg")
+        );
+        assert_eq!(
+            get(&resource, "vcs.ref.head.revision").as_deref(),
+            Some("abc123")
+        );
+
+        let resource = resource_with(
+            &built,
+            Some("vcs.repository.name=other,vcs.ref.head.revision=fff"),
+            None,
+        );
+        assert_eq!(
+            get(&resource, "vcs.repository.name").as_deref(),
+            Some("other")
+        );
+        assert_eq!(
+            get(&resource, "vcs.ref.head.revision").as_deref(),
+            Some("fff")
+        );
+
+        // Empty env values are ignored; empty build info omits the keys.
+        let resource = resource_with(&built, Some("vcs.repository.name="), None);
+        assert_eq!(
+            get(&resource, "vcs.repository.name").as_deref(),
+            Some("grorg")
+        );
+        let resource = resource_with(&config(), None, None);
+        assert_eq!(get(&resource, "vcs.repository.name"), None);
+        assert_eq!(get(&resource, "vcs.ref.head.revision"), None);
+        let empty = config().with_build_info(BuildInfo::default());
+        assert_eq!(
+            get(&resource_with(&empty, None, None), "vcs.repository.name"),
+            None
+        );
     }
 
     #[test]
