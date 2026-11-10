@@ -37,4 +37,3 @@ fn link_from_does_not_change_the_spans_labels() {
     carrier::link_from(&bare, &sent);
     assert_eq!(bare.in_scope(carrier::capture).baggage, None);
 }
-

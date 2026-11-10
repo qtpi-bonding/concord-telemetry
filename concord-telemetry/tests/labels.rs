@@ -143,9 +143,15 @@ fn a_late_context_add_reaches_children_created_after_it() {
         info_span!("late-after").in_scope(|| {});
     });
     drop(parent);
-    assert_eq!(span_attr(&one("late-after"), "turn_id").as_deref(), Some("t1"));
+    assert_eq!(
+        span_attr(&one("late-after"), "turn_id").as_deref(),
+        Some("t1")
+    );
     assert_eq!(span_attr(&one("late-before"), "turn_id"), None);
-    assert_eq!(span_attr(&one("late-parent"), "turn_id").as_deref(), Some("t1"));
+    assert_eq!(
+        span_attr(&one("late-parent"), "turn_id").as_deref(),
+        Some("t1")
+    );
 }
 
 #[test]
@@ -258,7 +264,10 @@ fn context_add_rejects_the_reserved_prefix() {
         1
     );
     drop(span);
-    assert_eq!(span_attr(&one("reserved-add"), "concord.label.action_id"), None);
+    assert_eq!(
+        span_attr(&one("reserved-add"), "concord.label.action_id"),
+        None
+    );
 }
 
 #[test]
@@ -287,7 +296,10 @@ fn capture_sees_only_this_tests_spans() {
     let names: Vec<String> = seen.iter().map(|s| s.name.to_string()).collect();
     assert_eq!(names, ["own-child"], "{names:?}");
     drop(mine);
-    let own: Vec<_> = spans().into_iter().filter(|s| s.name.starts_with("own-")).collect();
+    let own: Vec<_> = spans()
+        .into_iter()
+        .filter(|s| s.name.starts_with("own-"))
+        .collect();
     assert_eq!(own.len(), 2);
 }
 

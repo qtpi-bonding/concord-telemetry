@@ -107,7 +107,10 @@ pub(crate) fn collapse(attributes: &mut Vec<KeyValue>) {
         conflicts.sort();
         conflicts.dedup();
         let keys: Vec<StringValue> = conflicts.into_iter().map(StringValue::from).collect();
-        resolved.push(KeyValue::new(CONFLICTS_KEY, Value::Array(Array::String(keys))));
+        resolved.push(KeyValue::new(
+            CONFLICTS_KEY,
+            Value::Array(Array::String(keys)),
+        ));
     }
     *attributes = resolved;
 }
@@ -174,7 +177,11 @@ mod tests {
     fn the_wrapper_forwards_set_resource() {
         let calls = Calls::default();
         let _provider = provider(&calls);
-        assert!(calls.seen().contains(&"set_resource:svc".to_owned()), "{:?}", calls.seen());
+        assert!(
+            calls.seen().contains(&"set_resource:svc".to_owned()),
+            "{:?}",
+            calls.seen()
+        );
     }
 
     #[test]
@@ -199,7 +206,9 @@ mod tests {
         let calls = Calls::default();
         let wrapper = LabelCollapse(Recorder(calls.clone()));
         wrapper.shutdown().unwrap();
-        wrapper.shutdown_with_timeout(Duration::from_secs(1)).unwrap();
+        wrapper
+            .shutdown_with_timeout(Duration::from_secs(1))
+            .unwrap();
         assert_eq!(calls.seen(), ["shutdown", "shutdown_with_timeout"]);
     }
 
@@ -241,7 +250,9 @@ mod tests {
         assert_eq!(get("request_id").as_deref(), Some("own"));
         assert_eq!(get("agent_id").as_deref(), Some("G2"));
         assert_eq!(get(CONFLICTS_KEY).as_deref(), Some(r#"["request_id"]"#));
-        assert!(attributes.iter().all(|kv| !kv.key.as_str().starts_with(LABEL_PREFIX)));
+        assert!(attributes
+            .iter()
+            .all(|kv| !kv.key.as_str().starts_with(LABEL_PREFIX)));
         assert_eq!(attributes.len(), 6);
     }
 }

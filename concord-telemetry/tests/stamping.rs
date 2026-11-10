@@ -22,7 +22,11 @@ fn entering_a_stamped_span_again_does_no_stamping_work() {
     let child = parent.in_scope(|| info_span!("stamp-again"));
     let before = stamp_count();
     child.in_scope(|| {});
-    assert_eq!(stamp_count() - before, 2, "the first entry stamps both labels");
+    assert_eq!(
+        stamp_count() - before,
+        2,
+        "the first entry stamps both labels"
+    );
     let after_first = stamp_count();
     for _ in 0..10 {
         child.in_scope(|| {});
@@ -67,7 +71,8 @@ fn a_record_racing_the_first_enter() {
     let _c = capture_exclusive();
     for _ in 0..100 {
         let parent = labelled_parent("record-race");
-        let child = parent.in_scope(|| info_span!("race-record", action_id = tracing::field::Empty));
+        let child =
+            parent.in_scope(|| info_span!("race-record", action_id = tracing::field::Empty));
         let barrier = Arc::new(Barrier::new(2));
         let (b1, c1) = (Arc::clone(&barrier), child.clone());
         let (b2, c2) = (barrier, child.clone());
@@ -83,7 +88,10 @@ fn a_record_racing_the_first_enter() {
         record.join().expect("record");
         drop(child);
     }
-    let exported: Vec<_> = spans().into_iter().filter(|s| s.name == "race-record").collect();
+    let exported: Vec<_> = spans()
+        .into_iter()
+        .filter(|s| s.name == "race-record")
+        .collect();
     assert_eq!(exported.len(), 100);
     for span in &exported {
         assert_eq!(span_attr(span, "action_id").as_deref(), Some("A"));
@@ -115,11 +123,19 @@ fn context_add_racing_the_first_enter() {
     }
     let all = spans();
     let children: Vec<_> = all.iter().filter(|s| s.name == "race-add").collect();
-    let grandchildren: Vec<_> = all.iter().filter(|s| s.name == "race-add-grandchild").collect();
+    let grandchildren: Vec<_> = all
+        .iter()
+        .filter(|s| s.name == "race-add-grandchild")
+        .collect();
     assert_eq!(children.len(), 100);
     assert_eq!(grandchildren.len(), 100);
     for span in children.iter().chain(grandchildren.iter()) {
-        assert_eq!(span_attr(span, "turn_id").as_deref(), Some("NEW"), "{}", span.name);
+        assert_eq!(
+            span_attr(span, "turn_id").as_deref(),
+            Some("NEW"),
+            "{}",
+            span.name
+        );
         assert_eq!(span_attr(span, "action_id").as_deref(), Some("A"));
     }
 }
