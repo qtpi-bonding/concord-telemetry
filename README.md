@@ -203,9 +203,9 @@ silent on an empty carrier and sets the span attribute `ingress`; the gRPC
 
 `context::add("action_id", id)` puts a label in the current span's baggage:
 children and outgoing carriers inherit it, and it is a span attribute.
-Baggage is labels only, never authorization or routing. At most 8 entries,
-keys up to 64 bytes, values up to 128, the header up to 1024 and `tracestate`
-up to 256. Over a cap, or malformed, an entry is dropped and the header's
+Baggage is labels only, never authorization or routing. At most 16 entries,
+keys up to 64 bytes, values up to 256, and the header up to 8192 bytes of
+encoded text (W3C Baggage's limit). `tracestate` stays at 256. Over a cap, or malformed, an entry is dropped and the header's
 drops are recorded once as `concord.trace.baggage_dropped` with `dropped`;
 the request proceeds. Without an exporter every one of these is a no-op,
 `concord.trace.missing` never fires, and local output is unchanged.

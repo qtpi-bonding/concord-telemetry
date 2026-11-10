@@ -26,10 +26,10 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::{Context as LayerContext, Layer};
 use tracing_subscriber::registry::{LookupSpan, Registry};
 
-pub(crate) const MAX_ENTRIES: usize = 8;
+pub(crate) const MAX_ENTRIES: usize = 16;
 pub(crate) const MAX_KEY: usize = 64;
-pub(crate) const MAX_VALUE: usize = 128;
-pub(crate) const MAX_HEADER: usize = 1024;
+pub(crate) const MAX_VALUE: usize = 256;
+pub(crate) const MAX_HEADER: usize = 8192;
 
 /// The baggage of one span, in insertion order.
 #[derive(Clone, Debug, Default)]
@@ -244,9 +244,11 @@ fn parse_entry(segment: &str) -> Option<(String, String)> {
 }
 
 /// The entries as a `baggage` header, in order, stopping before the header
-/// would pass its cap. `None` when there is nothing to send.
+/// would pass its cap. Entries left out are recorded as one
+/// `baggage_dropped`. `None` when there is nothing to send.
 pub(crate) fn format(entries: &[(String, String)]) -> Option<String> {
     let mut header = String::new();
+    let mut written = 0;
     for (key, value) in entries.iter().take(MAX_ENTRIES) {
         let context =
             Context::new().with_baggage([opentelemetry::KeyValue::new(key.clone(), value.clone())]);
@@ -263,6 +265,11 @@ pub(crate) fn format(entries: &[(String, String)]) -> Option<String> {
             header.push(',');
         }
         header.push_str(&piece);
+        written += 1;
+    }
+    let left_out = entries.len() - written;
+    if left_out > 0 {
+        crate::carrier::emit_baggage_dropped(left_out);
     }
     (!header.is_empty()).then_some(header)
 }
