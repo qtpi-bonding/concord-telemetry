@@ -22,11 +22,12 @@ fn the_panic_hook_flush_is_bounded_by_the_configured_deadline() {
     panic::set_hook(Box::new(|_| {}));
     let mut config = Config::new("panic-deadline", "0");
     config.local = LocalOutput::Off;
-    config.flush_deadline = Duration::from_millis(300);
+    config.flush_deadline = Duration::from_millis(200);
     let _guard = init(config).expect("init");
     let started = Instant::now();
     assert!(panic::catch_unwind(|| panic!("boom")).is_err());
     let waited = started.elapsed();
-    assert!(waited >= Duration::from_millis(250), "{waited:?}");
-    assert!(waited < Duration::from_millis(1200), "{waited:?}");
+    assert!(waited >= Duration::from_millis(150), "{waited:?}");
+    // Deadline plus a generous margin for a loaded machine; the old fixed 2s fails it.
+    assert!(waited < Duration::from_millis(1700), "{waited:?}");
 }

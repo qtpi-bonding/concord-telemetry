@@ -1,15 +1,14 @@
 use crate::coded::emit_coded;
-use crate::deadline::run_exclusive;
+use crate::deadline::{run_exclusive, Gate};
 use coded_error::ErrorClass;
 use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider};
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 pub const PANIC_CODE: &str = "concord.process.panic";
 
 /// A flush started by a panic. At most one is in flight: a panic while it
-/// runs does not start another, and one after it finishes does.
-static FLUSHING: AtomicBool = AtomicBool::new(false);
+/// runs waits for it, within the deadline, and then flushes its own record.
+static FLUSHING: Gate = Gate::new();
 
 /// Installs the panic hook. Each panic is recorded, then both providers are
 /// flushed for at most `deadline` (`Config::flush_deadline`).
