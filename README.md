@@ -15,6 +15,11 @@ is the `Principal` message (hand-written prost types in `concord-telemetry`; the
 tiny `concord-telemetry-proto` crate exposes the proto's include path to
 consumers' `build.rs`, see "Importing `principal.proto`" below).
 
+## 0.3.1
+
+Additive: `context::add_from_baggage(header)`, the replacement for the
+adoption `link_from` no longer does (see below).
+
 ## Breaking changes in 0.3.0
 
 - `AttrValue::U64` is gone (nothing produced it; the derive records `u64` as strings).
@@ -217,7 +222,13 @@ silent on an empty carrier and sets the span attribute `ingress`; the gRPC
 
 `context::add("action_id", id)` puts a label in the current span's baggage:
 children and outgoing carriers inherit it, and it is a span attribute. A later
-`add` of the same key replaces the value. Baggage is labels only, never
+`add` of the same key replaces the value.
+`context::add_from_baggage(header)` adds every label of a `baggage` header
+string to the current span, like `add` for each entry in header order (latest
+wins, an unchanged value is not stamped again). The header is parsed with the
+incoming-carrier rules, and what the parse or the caps drop is recorded once
+as `baggage_dropped`. It replaces per-key helpers written around `add`, and
+like `add` it needs the span entered: `span.in_scope(|| add_from_baggage(h))`. Baggage is labels only, never
 authorization or routing. At most 24 entries (`context::MAX_ENTRIES`), keys up
 to 64 bytes, values up to 256, and the header up to 8192 bytes of encoded text
 (W3C Baggage's limit). `tracestate` stays at 512: over that, entries longer
@@ -229,7 +240,9 @@ no-op, `concord.trace.missing` never fires, and local output is unchanged.
 
 `link_from` carries span context only, as OpenTelemetry links do: it does not
 change the span's labels. A caller that wants a linked span's labels calls
-`context::add` for each (on an entered span: `span.in_scope(|| context::add(..))`).
+`context::add` for each, or hands the header to `context::add_from_baggage`
+(0.3.1, below); on a span that is not entered, wrap either in
+`span.in_scope(|| ..)`.
 `parent_on` on a span that was already entered is refused: it cannot re-parent
 and it leaves the labels as they are.
 

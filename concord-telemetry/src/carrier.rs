@@ -157,6 +157,23 @@ pub mod context {
     pub fn add(field: &'static str, value: impl Into<String>) {
         baggage::add(&Span::current(), field, value.into());
     }
+
+    /// Adds the labels of a `baggage` header to the current span, as `add`
+    /// does for each entry in header order: a key the span already holds is
+    /// overwritten, an unchanged value is not stamped again, and children and
+    /// outgoing carriers inherit the result. The header is parsed with the
+    /// same caps and malformed-entry handling as an incoming carrier (the
+    /// reserved `concord.` namespace is dropped), and the entries dropped,
+    /// by the parse or by the span's caps, are recorded once as
+    /// `concord.trace.baggage_dropped`. An empty header, or a span that
+    /// cannot hold baggage (no exporter), does nothing.
+    ///
+    /// This is an explicit add, so it works on a span that was already
+    /// entered. A span that is not entered is not the current span: call it
+    /// inside `span.in_scope(|| ..)`, as with `add`.
+    pub fn add_from_baggage(header: &str) {
+        baggage::add_header(&Span::current(), header);
+    }
 }
 
 /// Records, once each, an incoming `traceparent` that does not parse and a

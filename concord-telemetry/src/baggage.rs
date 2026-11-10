@@ -316,6 +316,37 @@ enum Added {
 /// namespace is dropped. A value equal to the label's current one changes and
 /// stamps nothing.
 pub(crate) fn add(span: &Span, key: &str, value: String) -> bool {
+    let added = try_add(span, key, value);
+    if added == Some(false) {
+        // After every guard is released: this emits a tracing event.
+        crate::carrier::emit_baggage_dropped(1);
+    }
+    added.unwrap_or(false)
+}
+
+/// Adds the labels of a `baggage` header to `span`, in header order, each as
+/// `add` would. Entries `parse` drops and entries the span refuses are
+/// counted and recorded once, after every guard is released. Does nothing
+/// where the span cannot hold baggage.
+pub(crate) fn add_header(span: &Span, header: &str) {
+    if !installed(span) {
+        return;
+    }
+    let (entries, mut dropped) = parse(header);
+    for (key, value) in entries {
+        if try_add(span, &key, value) == Some(false) {
+            dropped += 1;
+        }
+    }
+    if dropped > 0 {
+        crate::carrier::emit_baggage_dropped(dropped);
+    }
+}
+
+/// `add` without the record: `Some(true)` when kept, `Some(false)` when
+/// refused by a cap or the reserved namespace, `None` where the span cannot
+/// hold baggage.
+fn try_add(span: &Span, key: &str, value: String) -> Option<bool> {
     let outcome = with_extensions(span, |s| {
         let mut extensions = s.extensions_mut();
         if extensions.get_mut::<BaggageMap>().is_none() {
@@ -353,15 +384,11 @@ pub(crate) fn add(span: &Span, key: &str, value: String) -> bool {
     match outcome {
         Some(Added::Changed(label, generation)) => {
             stamp_until_stable(span, &[label], generation, || snapshot(span));
-            true
+            Some(true)
         }
-        Some(Added::Unchanged) => true,
-        Some(Added::Dropped) => {
-            // After every guard is released: this emits a tracing event.
-            crate::carrier::emit_baggage_dropped(1);
-            false
-        }
-        None => false,
+        Some(Added::Unchanged) => Some(true),
+        Some(Added::Dropped) => Some(false),
+        None => None,
     }
 }
 
