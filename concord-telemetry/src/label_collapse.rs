@@ -32,6 +32,12 @@ use std::time::Duration;
 /// from the span's own.
 pub(crate) const CONFLICTS_KEY: &str = "concord.label_conflicts";
 
+/// The provider's `max_attributes_per_span`. Labels are stamped on every
+/// change and only collapsed when the span ends, and the SDK's default of 128
+/// would drop later attributes (a status code recorded last) first. The
+/// collapse cannot recover attributes the SDK already dropped.
+pub(crate) const MAX_SPAN_ATTRIBUTES: u32 = 512;
+
 /// Wraps the exporting span processor and collapses labels in `on_end`.
 #[derive(Debug)]
 pub struct LabelCollapse<P>(pub P);
@@ -93,6 +99,10 @@ pub(crate) fn collapse(attributes: &mut Vec<KeyValue>) {
             resolved.push(kv.clone());
             continue;
         };
+        // Never a label's own key: it would overwrite the conflicts report.
+        if bare.is_empty() || bare == CONFLICTS_KEY {
+            continue;
+        }
         match last.iter().find(|own| own.key.as_str() == bare) {
             Some(own) => {
                 if own.value.as_str() != kv.value.as_str() {
@@ -104,6 +114,7 @@ pub(crate) fn collapse(attributes: &mut Vec<KeyValue>) {
         }
     }
     if !conflicts.is_empty() {
+        resolved.retain(|kv| kv.key.as_str() != CONFLICTS_KEY);
         conflicts.sort();
         conflicts.dedup();
         let keys: Vec<StringValue> = conflicts.into_iter().map(StringValue::from).collect();
@@ -254,5 +265,35 @@ mod tests {
             .iter()
             .all(|kv| !kv.key.as_str().starts_with(LABEL_PREFIX)));
         assert_eq!(attributes.len(), 6);
+    }
+
+    #[test]
+    fn a_label_never_renames_onto_the_conflicts_key() {
+        // A clean span: the label that would become concord.label_conflicts is dropped.
+        let mut clean = vec![
+            kv("concord.label.concord.label_conflicts", "x"),
+            kv("a", "1"),
+        ];
+        collapse(&mut clean);
+        assert!(
+            clean.iter().all(|kv| kv.key.as_str() != CONFLICTS_KEY),
+            "{clean:?}"
+        );
+
+        // A clashing span: exactly one conflicts key, listing only the real clash,
+        // even when the span already has one of its own.
+        let mut clash = vec![
+            kv("concord.label_conflicts", "own"),
+            kv("concord.label.concord.label_conflicts", "x"),
+            kv("concord.label.request_id", "caller"),
+            kv("request_id", "own"),
+        ];
+        collapse(&mut clash);
+        let found: Vec<String> = clash
+            .iter()
+            .filter(|kv| kv.key.as_str() == CONFLICTS_KEY)
+            .map(|kv| kv.value.to_string())
+            .collect();
+        assert_eq!(found, [r#"["request_id"]"#.to_owned()]);
     }
 }

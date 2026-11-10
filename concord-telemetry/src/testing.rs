@@ -69,6 +69,7 @@ fn install() -> &'static InMemoryLogExporter {
         }
         let span_exporter = InMemorySpanExporter::default();
         let tracer_provider = SdkTracerProvider::builder()
+            .with_max_attributes_per_span(crate::label_collapse::MAX_SPAN_ATTRIBUTES)
             .with_span_processor(crate::LabelCollapse(SimpleSpanProcessor::new(
                 span_exporter.clone(),
             )))
@@ -201,6 +202,15 @@ pub fn assert_no_label_conflict(spans: &[SpanData]) {
 /// an exported span cannot show them.
 pub fn stamp_count() -> usize {
     crate::baggage::STAMPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Installs a hook that the baggage layer calls on a span's first entry,
+/// after it decided to stamp and before it stamps; `None` removes it. For
+/// tests that park a thread there.
+pub fn set_enter_hook(hook: Option<Box<dyn Fn() + Send + Sync>>) {
+    *crate::baggage::ENTER_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = hook.map(std::sync::Arc::from);
 }
 
 /// Sets whether an exporter counts as configured, which `extract_required`

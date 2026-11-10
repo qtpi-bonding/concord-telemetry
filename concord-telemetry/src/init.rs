@@ -390,6 +390,7 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
             .build();
         let traces = SdkTracerProvider::builder()
             .with_resource(resource)
+            .with_max_attributes_per_span(crate::label_collapse::MAX_SPAN_ATTRIBUTES)
             .with_span_processor(crate::LabelCollapse(
                 BatchSpanProcessor::builder(span_exporter).build(),
             ))

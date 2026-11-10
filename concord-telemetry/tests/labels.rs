@@ -271,11 +271,6 @@ fn context_add_rejects_the_reserved_prefix() {
 }
 
 #[test]
-fn the_entry_cap_is_24() {
-    assert_eq!(context::MAX_ENTRIES, 24);
-}
-
-#[test]
 fn capture_sees_only_this_tests_spans() {
     let _c = capture_exclusive();
     // A non-exclusive user emits spans while this test holds the exclusive capture.
@@ -315,4 +310,73 @@ fn assert_no_label_conflict_fails_on_a_conflict() {
     let child = one("assert-child");
     let result = std::panic::catch_unwind(|| assert_no_label_conflict(&[child]));
     assert!(result.is_err());
+}
+
+#[test]
+fn an_incoming_key_in_the_concord_namespace_is_dropped_and_makes_no_conflict() {
+    let captured = capture_exclusive();
+    let incoming = TraceCarrier {
+        baggage: Some("concord.label_conflicts=x,concord.trace.y=1,ok=1".into()),
+        ..TraceCarrier::default()
+    };
+    let clean = info_span!("ns-clean");
+    carrier::parent_on(&clean, &incoming);
+    let sent = clean.in_scope(carrier::capture);
+    assert_eq!(sent.baggage.as_deref(), Some("ok=1"));
+    drop(clean);
+    assert_eq!(span_attr(&one("ns-clean"), "concord.label_conflicts"), None);
+    let dropped = captured.errors_where(|e| e.code == concord_telemetry::BAGGAGE_DROPPED_CODE);
+    assert_eq!(dropped.len(), 1);
+
+    let clashing = info_span!("ns-clash", request_id = "own");
+    carrier::parent_on(
+        &clashing,
+        &TraceCarrier {
+            baggage: Some("concord.label_conflicts=x,request_id=caller".into()),
+            ..TraceCarrier::default()
+        },
+    );
+    clashing.in_scope(|| {});
+    drop(clashing);
+    assert_eq!(
+        span_attr(&one("ns-clash"), "concord.label_conflicts").as_deref(),
+        Some(r#"["request_id"]"#)
+    );
+}
+
+#[test]
+fn context_add_rejects_the_whole_concord_namespace() {
+    let captured = capture_exclusive();
+    let span = info_span!("ns-add");
+    let sent = span.in_scope(|| {
+        context::add("concord.trace.x", "1");
+        context::add("concord.label_conflicts", "1");
+        carrier::capture()
+    });
+    assert_eq!(sent.baggage, None);
+    assert_eq!(
+        captured
+            .errors_where(|e| e.code == concord_telemetry::BAGGAGE_DROPPED_CODE)
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn parent_on_after_the_span_was_entered_changes_neither_trace_nor_labels() {
+    let _c = capture_exclusive();
+    let origin = info_span!(parent: None, "late-origin");
+    let sent = origin.in_scope(|| {
+        context::add("action_id", "other");
+        carrier::capture()
+    });
+    let span = info_span!(parent: None, "late-entered");
+    let before = span.in_scope(|| {
+        context::add("action_id", "mine");
+        carrier::capture()
+    });
+    carrier::parent_on(&span, &sent);
+    let after = span.in_scope(carrier::capture);
+    assert_eq!(after.traceparent, before.traceparent);
+    assert_eq!(after.baggage.as_deref(), Some("action_id=mine"));
 }

@@ -66,76 +66,106 @@ fn the_same_span_entered_on_two_threads_stamps_each_label_once() {
     }
 }
 
-#[test]
-fn a_record_racing_the_first_enter() {
-    let _c = capture_exclusive();
-    for _ in 0..100 {
-        let parent = labelled_parent("record-race");
-        let child =
-            parent.in_scope(|| info_span!("race-record", action_id = tracing::field::Empty));
-        let barrier = Arc::new(Barrier::new(2));
-        let (b1, c1) = (Arc::clone(&barrier), child.clone());
-        let (b2, c2) = (barrier, child.clone());
-        let enter = std::thread::spawn(move || {
-            b1.wait();
-            c1.in_scope(|| {});
-        });
-        let record = std::thread::spawn(move || {
-            b2.wait();
-            c2.record("action_id", "A");
-        });
-        enter.join().expect("enter");
-        record.join().expect("record");
-        drop(child);
-    }
-    let exported: Vec<_> = spans()
-        .into_iter()
-        .filter(|s| s.name == "race-record")
-        .collect();
-    assert_eq!(exported.len(), 100);
-    for span in &exported {
-        assert_eq!(span_attr(span, "action_id").as_deref(), Some("A"));
-        assert_eq!(span_attr(span, "concord.label_conflicts"), None);
+struct ClearHook;
+impl Drop for ClearHook {
+    fn drop(&mut self) {
+        concord_telemetry::testing::set_enter_hook(None);
     }
 }
 
+/// Parks the first thread that reaches the hook until `release` is sent.
+fn park_first_enter() -> (
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+    ClearHook,
+) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Mutex};
+    let (parked_tx, parked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = Mutex::new(release_rx);
+    let first = AtomicBool::new(true);
+    concord_telemetry::testing::set_enter_hook(Some(Box::new(move || {
+        if first.swap(false, Ordering::SeqCst) {
+            parked_tx.send(()).expect("parked");
+            let _ = release_rx.lock().expect("release").recv();
+        }
+    })));
+    (parked_rx, release_tx, ClearHook)
+}
+
 #[test]
-fn context_add_racing_the_first_enter() {
+fn a_context_add_does_not_wait_on_a_parked_first_enter_and_the_latest_value_exports() {
+    use std::sync::mpsc;
+    use std::time::Duration;
     let _c = capture_exclusive();
-    for _ in 0..100 {
-        let parent = labelled_parent("add-race");
-        let child = parent.in_scope(|| info_span!("race-add"));
-        let barrier = Arc::new(Barrier::new(2));
-        let (b1, c1) = (Arc::clone(&barrier), child.clone());
-        let (b2, c2) = (barrier, child.clone());
-        let enter = std::thread::spawn(move || {
-            b1.wait();
-            c1.in_scope(|| {});
-        });
-        let add = std::thread::spawn(move || {
-            b2.wait();
-            c2.in_scope(|| context::add("turn_id", "NEW"));
-        });
-        enter.join().expect("enter");
-        add.join().expect("add");
-        child.in_scope(|| info_span!("race-add-grandchild").in_scope(|| {}));
-        drop(child);
-    }
-    let all = spans();
-    let children: Vec<_> = all.iter().filter(|s| s.name == "race-add").collect();
-    let grandchildren: Vec<_> = all
-        .iter()
-        .filter(|s| s.name == "race-add-grandchild")
-        .collect();
-    assert_eq!(children.len(), 100);
-    assert_eq!(grandchildren.len(), 100);
-    for span in children.iter().chain(grandchildren.iter()) {
-        assert_eq!(
-            span_attr(span, "turn_id").as_deref(),
-            Some("NEW"),
-            "{}",
-            span.name
-        );
-        assert_eq!(span_attr(span, "action_id").as_deref(), Some("A"));
-    }
+    let parent = labelled_parent("parked");
+    let child = parent.in_scope(|| info_span!("stamp-parked"));
+    let (parked, release, _clear) = park_first_enter();
+
+    let first = child.clone();
+    let t1 = std::thread::spawn(move || first.in_scope(|| {}));
+    parked
+        .recv_timeout(Duration::from_secs(10))
+        .expect("T1 parks in on_enter");
+
+    let (done_tx, done_rx) = mpsc::channel();
+    let second = child.clone();
+    let t2 = std::thread::spawn(move || {
+        second.in_scope(|| context::add("turn_id", "NEW"));
+        done_tx.send(()).expect("done");
+    });
+    let finished = done_rx.recv_timeout(Duration::from_secs(10));
+    release.send(()).expect("release T1");
+    finished.expect("add finished while T1 was parked in on_enter");
+    t1.join().expect("T1");
+    t2.join().expect("T2");
+
+    drop(child);
+    let exported = spans()
+        .into_iter()
+        .find(|s| s.name == "stamp-parked")
+        .expect("exported");
+    assert_eq!(span_attr(&exported, "turn_id").as_deref(), Some("NEW"));
+    assert_eq!(span_attr(&exported, "action_id").as_deref(), Some("A"));
+}
+
+#[test]
+fn a_context_add_on_a_span_with_no_labels_marks_it_stamped() {
+    let _c = capture_exclusive();
+    let span = info_span!(parent: None, "stamp-fresh");
+    span.in_scope(|| context::add("action_id", "A"));
+    let before = stamp_count();
+    span.in_scope(|| {});
+    span.in_scope(|| {});
+    assert_eq!(stamp_count(), before, "re-entering stamps nothing");
+}
+
+#[test]
+fn an_unchanged_value_is_not_stamped_again() {
+    let _c = capture_exclusive();
+    let span = info_span!(parent: None, "stamp-same");
+    span.in_scope(|| context::add("action_id", "A"));
+    let before = stamp_count();
+    span.in_scope(|| context::add("action_id", "A"));
+    assert_eq!(stamp_count(), before);
+}
+
+#[test]
+fn two_hundred_adds_export_the_last_value_and_a_later_record_survives() {
+    let _c = capture_exclusive();
+    let span = info_span!(parent: None, "stamp-many", status = tracing::field::Empty);
+    span.in_scope(|| {
+        for i in 0..200 {
+            context::add("turn_id", format!("t{i}"));
+        }
+    });
+    span.record("status", 404);
+    drop(span);
+    let exported = spans()
+        .into_iter()
+        .find(|s| s.name == "stamp-many")
+        .expect("exported");
+    assert_eq!(span_attr(&exported, "turn_id").as_deref(), Some("t199"));
+    assert_eq!(span_attr(&exported, "status").as_deref(), Some("404"));
 }

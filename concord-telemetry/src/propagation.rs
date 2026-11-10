@@ -59,13 +59,14 @@ pub(crate) fn parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>)
     let context = carrier::extract_context(&get);
     let valid = context.span().span_context().is_valid();
     carrier::report_invalid(span, &get, valid);
-    if valid {
-        // Every error means no OpenTelemetry parent can be set (no layer,
-        // span disabled, already started); none is worth reporting.
-        let _ = span.set_parent(context);
-    }
-    if let Some(header) = get("baggage") {
-        baggage::ingest(span, &header);
+    // An error means no OpenTelemetry parent can be set (no layer, span
+    // disabled, already started); none is worth reporting. A span that was
+    // already started refuses the carrier's baggage too.
+    let parented = !valid || span.set_parent(context).is_ok();
+    if parented {
+        if let Some(header) = get("baggage") {
+            baggage::ingest(span, &header);
+        }
     }
     valid
 }

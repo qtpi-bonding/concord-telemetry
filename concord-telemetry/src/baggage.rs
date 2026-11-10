@@ -18,6 +18,7 @@
 //!
 //! The layer keeps one flag per span, `stamped`. After the first entry
 //! `on_enter` reads it and returns: no clone, no allocation, no write lock.
+//! Writers hold no lock across `set_attribute`: see `BaggageMap`.
 //! The layer tracks nothing else, has no `on_record`, and never runs user
 //! `Debug` or `Display`.
 //!
@@ -39,7 +40,7 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::{Context, Key, Value};
 use opentelemetry_sdk::propagation::BaggagePropagator;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use tracing::span::Id;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -52,12 +53,35 @@ pub(crate) const MAX_KEY: usize = 64;
 pub(crate) const MAX_VALUE: usize = 256;
 pub(crate) const MAX_HEADER: usize = 8192;
 
+/// The whole `concord.` namespace is reserved: no label or incoming baggage
+/// key may start with it, so a key can never collide with an attribute the
+/// library itself writes (`concord.label.*`, `concord.label_conflicts`).
+pub(crate) const RESERVED_NAMESPACE: &str = "concord.";
+
 /// The attribute prefix under which labels are stamped. Reserved: no label
 /// or incoming baggage key may start with it.
 pub(crate) use concord_fields::LABEL_PREFIX;
 
 #[cfg(feature = "testing")]
 pub(crate) static STAMPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Called by `on_enter` after it has decided to stamp and before it stamps, so
+/// a test can park a thread there (the `testing` feature).
+#[cfg(feature = "testing")]
+pub(crate) static ENTER_HOOK: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
+
+fn enter_hook() {
+    #[cfg(feature = "testing")]
+    {
+        let hook = ENTER_HOOK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+}
 
 /// One label. Cloning it bumps reference counts and allocates nothing.
 #[derive(Clone, Debug)]
@@ -88,24 +112,46 @@ impl Label {
 
 /// The baggage of one span, in insertion order. A child shares its parent's
 /// labels until either changes them.
+///
+/// Stamping takes no lock across `set_attribute`. A writer changes the map
+/// under the extensions write lock and bumps `generation`, releases it,
+/// stamps, then re-reads under a read lock: if the generation moved, another
+/// writer changed the map meanwhile, and it stamps the newer values again.
+/// `SpanData.attributes` keeps write order, so the last stamp of a key is the
+/// one the collapse keeps, and the final stamp of every key is its latest
+/// value. The extensions lock is never held while user code (`Debug`) runs
+/// under it elsewhere: tracing-subscriber's fmt layer does that.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct BaggageMap {
     pub labels: Arc<Vec<Label>>,
+    /// Bumped by every change to `labels`.
+    generation: u64,
     /// True once every label in `labels` has been stamped on the span.
     stamped: bool,
 }
 
-/// Labels written to a span's attributes in the order the map changes: a static
-/// array of locks indexed by span id, held from the label-map update until
-/// `set_attribute` returns. `SpanData.attributes` keeps write order, so the
-/// last stamp of a key is the one the collapse keeps. Lock order: this lock,
-/// then the span's extensions, then `OtelData`. No user code runs under it.
-static STAMP_LOCKS: [Mutex<()>; 64] = [const { Mutex::new(()) }; 64];
+type Snapshot = (u64, Arc<Vec<Label>>);
 
-fn stamp_lock(id: &Id) -> MutexGuard<'static, ()> {
-    STAMP_LOCKS[(id.into_u64() % 64) as usize]
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+/// Stamps `first`, then keeps stamping the latest labels while the map's
+/// generation moves. `read` takes the current snapshot under a read lock.
+fn stamp_until_stable(
+    span: &Span,
+    first: &[Label],
+    mut generation: u64,
+    read: impl Fn() -> Option<Snapshot>,
+) {
+    for label in first {
+        label.stamp(span);
+    }
+    while let Some((now, labels)) = read() {
+        if now == generation {
+            return;
+        }
+        generation = now;
+        for label in labels.iter() {
+            label.stamp(span);
+        }
+    }
 }
 
 /// Copies baggage from parent to child and stamps it onto the span's
@@ -129,6 +175,7 @@ where
                 .get::<BaggageMap>()
                 .map(|map| BaggageMap {
                     labels: Arc::clone(&map.labels),
+                    generation: 0,
                     stamped: false,
                 })
         });
@@ -146,12 +193,15 @@ where
                 _ => return,
             }
         }
+        // The thread's current span must be this one: the id alone can match a
+        // span of another (scoped) dispatcher.
         let current = Span::current();
-        if current.id().as_ref() != Some(id) {
+        if current.id().as_ref() != Some(id)
+            || current.metadata().map(|m| m.callsite()) != Some(span.metadata().callsite())
+        {
             return;
         }
-        let _stamping = stamp_lock(id);
-        let labels = {
+        let (generation, labels) = {
             let mut extensions = span.extensions_mut();
             let Some(map) = extensions.get_mut::<BaggageMap>() else {
                 return;
@@ -160,12 +210,15 @@ where
                 return;
             }
             map.stamped = true;
-            Arc::clone(&map.labels)
+            (map.generation, Arc::clone(&map.labels))
         };
-        // The extensions lock is released: set_attribute takes the same lock.
-        for label in labels.iter() {
-            label.stamp(&current);
-        }
+        // No lock is held: set_attribute takes the extensions lock itself.
+        enter_hook();
+        stamp_until_stable(&current, &labels, generation, || {
+            span.extensions()
+                .get::<BaggageMap>()
+                .map(|map| (map.generation, Arc::clone(&map.labels)))
+        });
     }
 }
 
@@ -205,61 +258,92 @@ pub(crate) fn entries(span: &Span) -> Vec<(String, String)> {
     .unwrap_or_default()
 }
 
+fn snapshot(span: &Span) -> Option<Snapshot> {
+    with_extensions(span, |s| {
+        s.extensions()
+            .get::<BaggageMap>()
+            .map(|map| (map.generation, Arc::clone(&map.labels)))
+    })
+    .flatten()
+}
+
 /// Replaces the span's baggage with `new` and stamps every label.
 pub(crate) fn set(span: &Span, new: Vec<(String, String)>) {
-    let Some(id) = span.id() else { return };
-    let _stamping = stamp_lock(&id);
-    let labels = with_extensions(span, |s| {
+    let replaced = with_extensions(span, |s| {
         let labels: Arc<Vec<Label>> = Arc::new(
             new.iter()
                 .map(|(key, value)| Label::new(key, value))
                 .collect(),
         );
-        s.extensions_mut().replace(BaggageMap {
+        let mut extensions = s.extensions_mut();
+        let generation = extensions
+            .get_mut::<BaggageMap>()
+            .map_or(0, |map| map.generation)
+            + 1;
+        extensions.replace(BaggageMap {
             labels: Arc::clone(&labels),
+            generation,
             stamped: true,
         });
-        labels
-    })
-    .unwrap_or_default();
-    for label in labels.iter() {
-        label.stamp(span);
+        (generation, labels)
+    });
+    if let Some((generation, labels)) = replaced {
+        stamp_until_stable(span, &labels, generation, || snapshot(span));
     }
 }
 
+enum Added {
+    Dropped,
+    Unchanged,
+    Changed(Label, u64),
+}
+
 /// Adds one label to `span`, subject to the caps, and stamps it. Returns
-/// false when it was dropped (and recorded). A key with the reserved prefix
-/// is dropped.
+/// false when it was dropped (and recorded). A key in the reserved `concord.`
+/// namespace is dropped. A value equal to the label's current one changes and
+/// stamps nothing.
 pub(crate) fn add(span: &Span, key: &str, value: String) -> bool {
-    let Some(id) = span.id() else { return false };
-    let _stamping = stamp_lock(&id);
     let outcome = with_extensions(span, |s| {
         let mut extensions = s.extensions_mut();
         if extensions.get_mut::<BaggageMap>().is_none() {
-            extensions.insert(BaggageMap::default());
+            // `add` runs on the entered span, so there is nothing to stamp later.
+            extensions.insert(BaggageMap {
+                stamped: true,
+                ..BaggageMap::default()
+            });
         }
         let map = extensions.get_mut::<BaggageMap>()?;
         let fits = key.len() <= MAX_KEY
             && !key.is_empty()
-            && !key.starts_with(LABEL_PREFIX)
+            && !key.starts_with(RESERVED_NAMESPACE)
             && value.len() <= MAX_VALUE
             && (map.labels.len() < MAX_ENTRIES || map.labels.iter().any(|l| l.key.as_str() == key));
         if !fits {
-            return Some(None);
+            return Some(Added::Dropped);
+        }
+        if map
+            .labels
+            .iter()
+            .any(|l| l.key.as_str() == key && *l.value == *value)
+        {
+            return Some(Added::Unchanged);
         }
         let label = Label::new(key, &value);
         let labels = Arc::make_mut(&mut map.labels);
         labels.retain(|l| l.key.as_str() != key);
         labels.push(label.clone());
-        Some(Some(label))
+        map.generation += 1;
+        Some(Added::Changed(label, map.generation))
     })
     .flatten();
     match outcome {
-        Some(Some(label)) => {
-            label.stamp(span);
+        Some(Added::Changed(label, generation)) => {
+            stamp_until_stable(span, &[label], generation, || snapshot(span));
             true
         }
-        Some(None) => {
+        Some(Added::Unchanged) => true,
+        Some(Added::Dropped) => {
+            // After every guard is released: this emits a tracing event.
             crate::carrier::emit_baggage_dropped(1);
             false
         }
@@ -267,10 +351,21 @@ pub(crate) fn add(span: &Span, key: &str, value: String) -> bool {
     }
 }
 
+/// True once `span` was entered with labels: its attributes are fixed by then.
+fn entered_with_labels(span: &Span) -> bool {
+    with_extensions(span, |s| {
+        s.extensions()
+            .get::<BaggageMap>()
+            .is_some_and(|map| map.stamped && !map.labels.is_empty())
+    })
+    .unwrap_or(false)
+}
+
 /// Parses an incoming header into `span`'s baggage, recording what was
-/// dropped. A no-op where the span cannot hold baggage.
+/// dropped. A no-op where the span cannot hold baggage, and on a span that was
+/// already entered with labels: like `set_parent`, it is refused.
 pub(crate) fn ingest(span: &Span, header: &str) {
-    if !installed(span) {
+    if !installed(span) || entered_with_labels(span) {
         return;
     }
     let (kept, dropped) = parse(header);
@@ -291,7 +386,7 @@ pub(crate) fn parse(header: &str) -> (Vec<(String, String)>, usize) {
     for segment in segments {
         match parse_entry(segment.trim()) {
             Some((key, value))
-                if !key.starts_with(LABEL_PREFIX)
+                if !key.starts_with(RESERVED_NAMESPACE)
                     && (kept.len() < MAX_ENTRIES || kept.iter().any(|(k, _)| *k == key)) =>
             {
                 kept.retain(|(k, _)| *k != key);

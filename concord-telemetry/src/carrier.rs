@@ -99,8 +99,9 @@ fn getter(c: &TraceCarrier) -> impl Fn(&str) -> Option<String> + '_ {
 /// Makes `span` a child of the carrier's trace and replaces the span's labels
 /// with the carrier's baggage, when it has a `baggage` header. Call it before
 /// `span` is first entered: entering fixes its trace (`context::add` needs the
-/// span entered, so it does too), and a later `parent_on` cannot re-parent,
-/// though it still replaces the labels. A carrier without a valid
+/// span entered, so it does too). On a span that was already entered, a
+/// `traceparent` is refused (`set_parent` cannot re-parent) and so is the
+/// baggage: the labels stay as they were. A carrier without a valid
 /// `traceparent` leaves the span's contextual parent in place.
 pub fn parent_on(span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
