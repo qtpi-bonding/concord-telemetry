@@ -16,10 +16,11 @@ use crate::baggage::BaggageMap;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::logs::{AnyValue, LogRecord as _};
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry::{Context, KeyValue};
+use opentelemetry::{Context, KeyValue, Value};
 use opentelemetry_sdk::logs::{LogProcessor, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -105,15 +106,23 @@ where
         let Some(body) = body.strip_suffix('}') else {
             return writer.write_str(&line);
         };
-        let entries = ctx
+        let labels = ctx
             .event_scope()
             .and_then(|mut scope| scope.next())
-            .and_then(|span| span.extensions().get::<BaggageMap>().cloned())
+            .and_then(|span| {
+                span.extensions()
+                    .get::<BaggageMap>()
+                    .map(|map| Arc::clone(&map.labels))
+            })
             .unwrap_or_default();
-        let baggage: serde_json::Map<String, serde_json::Value> = entries
-            .0
-            .into_iter()
-            .map(|(key, value)| (key, serde_json::Value::String(value)))
+        let baggage: serde_json::Map<String, serde_json::Value> = labels
+            .iter()
+            .map(|label| {
+                (
+                    label.key.to_string(),
+                    serde_json::Value::String(label.value.to_string()),
+                )
+            })
             .collect();
         let baggage = serde_json::Value::Object(baggage);
         writeln!(
@@ -192,18 +201,18 @@ where
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: LayerContext<'_, S>) {
-        let entries = ctx.event_span(event).and_then(|span| {
+        let labels = ctx.event_span(event).and_then(|span| {
             span.extensions()
                 .get::<BaggageMap>()
-                .map(|map| map.0.clone())
+                .map(|map| Arc::clone(&map.labels))
         });
         // The extensions lock is released before the bridge runs.
         crate::location::with_event_location(event.metadata(), || {
-            match entries.filter(|entries| !entries.is_empty()) {
-                Some(entries) => {
-                    let baggage = entries
-                        .into_iter()
-                        .map(|(key, value)| KeyValue::new(key, value));
+            match labels.filter(|labels| !labels.is_empty()) {
+                Some(labels) => {
+                    let baggage = labels.iter().map(|label| {
+                        KeyValue::new(label.key.clone(), Value::from(Arc::clone(&label.value)))
+                    });
                     let _guard = Context::current().with_baggage(baggage).attach();
                     self.0.on_event(event, ctx);
                 }

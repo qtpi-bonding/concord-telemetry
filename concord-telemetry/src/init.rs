@@ -4,7 +4,7 @@ use opentelemetry::KeyValue;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::{
     logs::{BatchLogProcessor, SdkLoggerProvider},
-    trace::SdkTracerProvider,
+    trace::{BatchSpanProcessor, SdkTracerProvider},
     Resource,
 };
 use std::hash::{BuildHasher, Hasher};
@@ -390,7 +390,9 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
             .build();
         let traces = SdkTracerProvider::builder()
             .with_resource(resource)
-            .with_batch_exporter(span_exporter)
+            .with_span_processor(crate::LabelCollapse(
+                BatchSpanProcessor::builder(span_exporter).build(),
+            ))
             .build();
         (Some(logs), Some(traces))
     } else {

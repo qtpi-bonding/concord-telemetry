@@ -3,7 +3,9 @@ use crate::{AttrValue, Attrs, Event, EVENT_TARGET};
 use opentelemetry::logs::AnyValue;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider, SimpleLogProcessor};
-use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData};
+use opentelemetry_sdk::trace::{
+    InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData,
+};
 use std::ops::Deref;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
@@ -67,7 +69,9 @@ fn install() -> &'static InMemoryLogExporter {
         }
         let span_exporter = InMemorySpanExporter::default();
         let tracer_provider = SdkTracerProvider::builder()
-            .with_simple_exporter(span_exporter.clone())
+            .with_span_processor(crate::LabelCollapse(SimpleSpanProcessor::new(
+                span_exporter.clone(),
+            )))
             .build();
         let _ = SPANS.set(span_exporter);
         let span_layer =
@@ -145,6 +149,60 @@ pub fn spans() -> Vec<SpanData> {
         .unwrap_or_default()
 }
 
+/// The spans of the trace `span` belongs to, oldest first. Unlike `spans()`
+/// it leaves out spans other tests in the same binary emit through a
+/// non-exclusive `capture()`. The span is started if it was not yet.
+pub fn spans_in_trace(span: &tracing::Span) -> Vec<SpanData> {
+    use opentelemetry::trace::TraceContextExt;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    let trace_id = span.context().span().span_context().trace_id();
+    spans()
+        .into_iter()
+        .filter(|s| s.span_context.trace_id() == trace_id)
+        .collect()
+}
+
+/// The value of attribute `key` on an exported span, as a string. Panics when
+/// the span carries the key twice: an exported span must not.
+pub fn span_attr(span: &SpanData, key: &str) -> Option<String> {
+    let mut found = span
+        .attributes
+        .iter()
+        .filter(|kv| kv.key.as_str() == key)
+        .map(|kv| kv.value.as_str().into_owned());
+    let first = found.next();
+    assert!(
+        found.next().is_none(),
+        "span {:?} exports attribute {key} twice",
+        span.name
+    );
+    first
+}
+
+/// Panics when a span reports `concord.label_conflicts`: its own field
+/// held a different value than an inherited label of the same key.
+pub fn assert_no_label_conflict(spans: &[SpanData]) {
+    for span in spans {
+        let conflicts = span
+            .attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == "concord.label_conflicts");
+        assert!(
+            conflicts.is_none(),
+            "span {:?} has label conflicts: {:?}",
+            span.name,
+            conflicts.map(|kv| kv.value.to_string())
+        );
+    }
+}
+
+/// How many label attributes the baggage layer has written so far, for tests
+/// of the layer's work. The end-of-span collapse hides repeated writes, so
+/// an exported span cannot show them.
+pub fn stamp_count() -> usize {
+    crate::baggage::STAMPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Sets whether an exporter counts as configured, which `extract_required`
 /// checks before it records `concord.trace.missing`. `capture()` leaves it off.
 pub fn set_otel_active(active: bool) {
@@ -202,6 +260,9 @@ impl Capture {
 
     fn clear(&self) {
         self.exporter.reset();
+        if let Some(spans) = SPANS.get() {
+            spans.reset();
+        }
     }
 
     pub fn events<E: Event>(&self) -> Vec<E> {

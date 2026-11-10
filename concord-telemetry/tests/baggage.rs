@@ -1,5 +1,6 @@
 use concord_telemetry::carrier;
 use concord_telemetry::context;
+use concord_telemetry::context::MAX_ENTRIES;
 use concord_telemetry::testing::{capture_exclusive, spans};
 use concord_telemetry::{AttrValue, TraceCarrier, BAGGAGE_DROPPED_CODE};
 use tracing::info_span;
@@ -41,10 +42,10 @@ fn ingest(header: &str) -> (Vec<String>, Vec<i64>) {
 
 #[test]
 fn oversize_and_malformed_baggage_is_dropped_once() {
-    // 17 entries: the seventeenth is over the cap.
-    let seventeen: Vec<String> = (0..17).map(entry).collect();
+    // One entry over the cap.
+    let seventeen: Vec<String> = (0..=MAX_ENTRIES).map(entry).collect();
     let (kept, dropped) = ingest(&seventeen.join(","));
-    assert_eq!(kept.len(), 16, "{kept:?}");
+    assert_eq!(kept.len(), MAX_ENTRIES, "{kept:?}");
     assert_eq!(dropped, vec![1]);
 
     // A 257-byte value.
@@ -83,13 +84,13 @@ fn caps_hold_on_the_way_out_too() {
     let captured = capture_exclusive();
     let span = info_span!("a2-add-caps");
     let sent = span.in_scope(|| {
-        for i in 0..18 {
+        for i in 0..MAX_ENTRIES + 2 {
             context::add(Box::leak(format!("k{i}").into_boxed_str()), "v");
         }
         context::add("big", "v".repeat(257));
         carrier::capture()
     });
-    assert_eq!(sent.baggage.unwrap().split(',').count(), 16);
+    assert_eq!(sent.baggage.unwrap().split(',').count(), MAX_ENTRIES);
     assert_eq!(
         captured
             .errors_where(|e| e.code == BAGGAGE_DROPPED_CODE)
@@ -138,7 +139,7 @@ fn overwriting_a_key_at_the_entry_cap_is_allowed() {
     let captured = capture_exclusive();
     let span = info_span!("a2-overwrite");
     let sent = span.in_scope(|| {
-        for i in 0..16 {
+        for i in 0..MAX_ENTRIES {
             context::add(Box::leak(format!("k{i}").into_boxed_str()), "v");
         }
         context::add("k3", "new");
@@ -150,7 +151,7 @@ fn overwriting_a_key_at_the_entry_cap_is_allowed() {
         .split(',')
         .map(str::to_owned)
         .collect();
-    assert_eq!(entries.len(), 16, "{entries:?}");
+    assert_eq!(entries.len(), MAX_ENTRIES, "{entries:?}");
     assert!(entries.contains(&"k3=new".to_owned()), "{entries:?}");
     assert!(captured
         .errors_where(|e| e.code == BAGGAGE_DROPPED_CODE)
@@ -161,10 +162,10 @@ fn overwriting_a_key_at_the_entry_cap_is_allowed() {
     // The same holds on ingest: a repeated key replaces, nothing is dropped.
     let header = format!(
         "{},k3=new",
-        (0..16).map(entry).collect::<Vec<_>>().join(",")
+        (0..MAX_ENTRIES).map(entry).collect::<Vec<_>>().join(",")
     );
     let (kept, dropped) = ingest(&header);
-    assert_eq!(kept.len(), 16, "{kept:?}");
+    assert_eq!(kept.len(), MAX_ENTRIES, "{kept:?}");
     assert!(kept.contains(&"k3=new".to_owned()), "{kept:?}");
     assert!(dropped.is_empty());
 }
@@ -177,7 +178,7 @@ fn format_records_entries_it_cannot_fit() {
     // is 768 bytes on the wire, so about ten entries fill the 8192-byte header.
     let value = "é".repeat(128);
     let sent = span.in_scope(|| {
-        for i in 0..16 {
+        for i in 0..MAX_ENTRIES {
             context::add(Box::leak(format!("k{i}").into_boxed_str()), value.clone());
         }
         carrier::capture()
@@ -185,7 +186,7 @@ fn format_records_entries_it_cannot_fit() {
     let header = sent.baggage.expect("baggage");
     assert!(header.len() <= 8192, "{}", header.len());
     let written = header.split(',').count();
-    assert!((1..16).contains(&written), "{written}");
+    assert!((1..MAX_ENTRIES).contains(&written), "{written}");
     let dropped: Vec<i64> = captured
         .errors_where(|e| e.code == BAGGAGE_DROPPED_CODE)
         .into_iter()
@@ -194,7 +195,7 @@ fn format_records_entries_it_cannot_fit() {
             other => panic!("dropped count missing: {other:?}"),
         })
         .collect();
-    assert_eq!(dropped, vec![(16 - written) as i64]);
+    assert_eq!(dropped, vec![(MAX_ENTRIES - written) as i64]);
 }
 
 #[test]

@@ -142,6 +142,9 @@ pub fn root(name: &'static str) -> Span {
 pub mod context {
     use super::*;
 
+    /// The most labels one span's baggage holds.
+    pub const MAX_ENTRIES: usize = crate::baggage::MAX_ENTRIES;
+
     /// Adds a label to the current span's baggage and records it as a span
     /// attribute. Children and outgoing carriers inherit it. Over the baggage
     /// caps it is dropped and recorded.
