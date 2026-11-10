@@ -1,12 +1,5 @@
 # concord-telemetry
 
-## concord-lint ratchet rules
-
-The lint tool reports `ratchet.result_string`, `ratchet.dropped_result`,
-`ratchet.error_to_string`, `ratchet.untraced_spawn`, and `ratchet.raw_channel`.
-These findings use the same counting baseline mechanism as the existing rules;
-test files and `#[cfg(test)]` modules are skipped.
-
 One `init`, domain events and coded error records on OpenTelemetry. A repo's
 binaries and its own internal crates (e.g. grorg's `ops`, which emits domain
 events after the write) may depend on it. Crates other repos depend on (proto
@@ -15,7 +8,8 @@ do. Consumers depend on `concord-telemetry` and `tracing`, never on an
 `opentelemetry*` crate directly.
 
 Workspace: `concord-telemetry` (library), `concord-telemetry-derive`
-(`#[derive(Event)]`, re-exported), `concord-lint` (checker binary). The shared
+(`#[derive(Event)]`, re-exported), `concord-lint` (checker binary),
+`concord-fields` (the one parser of `fields.toml`, used by the derive and the lint). The shared
 field registry is `fields.toml`; `concord-telemetry-proto/proto/concord_telemetry/v1/principal.proto`
 is the `Principal` message (hand-written prost types in `concord-telemetry`; the
 tiny `concord-telemetry-proto` crate exposes the proto's include path to
@@ -202,13 +196,43 @@ silent on an empty carrier and sets the span attribute `ingress`; the gRPC
 `ServerLayer` is an ingress.
 
 `context::add("action_id", id)` puts a label in the current span's baggage:
-children and outgoing carriers inherit it, and it is a span attribute.
-Baggage is labels only, never authorization or routing. At most 16 entries,
-keys up to 64 bytes, values up to 256, and the header up to 8192 bytes of
-encoded text (W3C Baggage's limit). `tracestate` stays at 256. Over a cap, or malformed, an entry is dropped and the header's
-drops are recorded once as `concord.trace.baggage_dropped` with `dropped`;
-the request proceeds. Without an exporter every one of these is a no-op,
-`concord.trace.missing` never fires, and local output is unchanged.
+children and outgoing carriers inherit it, and it is a span attribute. A later
+`add` of the same key replaces the value. Baggage is labels only, never
+authorization or routing. At most 24 entries (`context::MAX_ENTRIES`), keys up
+to 64 bytes, values up to 256, and the header up to 8192 bytes of encoded text
+(W3C Baggage's limit). `tracestate` stays at 512: over that, entries longer
+than 128 characters go first, then whole entries from the end, and the header is
+never dropped whole. Over a cap, or malformed, an entry is dropped and the
+header's drops are recorded once as `concord.trace.baggage_dropped` with
+`dropped`; the request proceeds. Without an exporter every one of these is a
+no-op, `concord.trace.missing` never fires, and local output is unchanged.
+
+`link_from` carries span context only, as OpenTelemetry links do: it does not
+change the span's labels. A caller that wants a linked span's labels calls
+`context::add` for each.
+
+How labels become attributes. The layer stamps inherited labels, and `add`
+stamps its own, under `concord.label.<key>`, never the bare key. A processor
+wrapped around the exporting one, `LabelCollapse`, resolves each span when it
+ends: a repeated key (re-recorded fields, two `error!` calls) exports its last
+value once; a `concord.label.<k>` is renamed to `<k>`, unless the span has its
+own `<k>`, in which case the span's value wins and, when the exported strings
+differ, the key is listed in the span attribute `concord.label_conflicts` (keys
+only, never values). `init` and `testing` install the wrapper; a custom
+tracer provider must use
+`SdkTracerProvider::builder().with_span_processor(LabelCollapse(your_processor))`
+or every label stays under its `concord.label.` key and repeats are exported.
+The prefix `concord.label.` is reserved: `context::add` refuses it and an
+incoming baggage key with it is dropped and counted.
+
+Limits. A span created but never entered gets no inherited labels. Labels land
+after the span starts, so samplers and `SpanProcessor::on_start` never see them
+(tracing-opentelemetry keeps its span data private). Stamped labels count
+against the SDK's 128 attributes per span, and the collapse cannot recover
+attributes the SDK has already dropped. Logs differ: an event's own field wins
+over a label of the same name, silently. tracing-subscriber's fmt layer formats
+a user's `Debug` under its own lock, which a `Debug` impl that logs can
+deadlock on; nothing here changes that, and nothing here runs user `Debug`.
 
 ## Testing
 
@@ -216,8 +240,12 @@ Enable the `testing` feature in dev-dependencies. `testing::capture()` installs
 one process-global subscriber (panics if one is already set) and returns a
 `Capture`; find events by a domain value you created:
 `cap.single_event_where::<E>(|e| e.source_record_id == id)`. Tests never call
-`init`. `capture_exclusive()` serializes and clears the store (use it in a test
-binary of its own). If your tests already install a global subscriber, add
+`init`. `capture_exclusive()` serializes and clears the store, spans included; other
+tests using plain `capture()` in the same binary still write spans, so read
+them with `spans_in_trace(&span)`. `span_attr(&span, key)` panics when a span
+exports a key twice, and `assert_no_label_conflict(&spans)` fails on any
+`concord.label_conflicts`. Spans reach the store through `LabelCollapse`, so a
+test sees what the collector sees. If your tests already install a global subscriber, add
 `testing::layer()` to it and read with `testing::reader()`. Both paths were
 confirmed against grorg (tonic server tests) and structmux (daemon tests).
 
@@ -230,9 +258,21 @@ arguments), field names against `fields.toml` plus your local overlay, never-log
 names everywhere, and `process::exit` in binaries. Exit 0 clean, 1 violations,
 2 usage or parse error. The baseline counts repeats, so a new copy of a
 baselined violation is new. It parses source and never compiles your crate.
-Known limits: span macros and `#[instrument(fields(..))]` are not checked;
+Label rules: a label (a field marked `label = true` in `fields.toml`, or in your
+`fields.local.toml`) must not be recorded through Debug, by `?` in a span macro or
+`#[instrument(fields(..))]`, or implicitly as an `#[instrument]` parameter whose
+type tracing-attributes records through Debug and that is not skipped or shadowed by
+`fields(..)` (`label-debug`); and the prefix `concord.label.` is not a field name
+(`reserved-label-prefix`). Known limits: other span-macro and `#[instrument]` fields are not checked against the registry;
 `process::exit` in modules of a binary (`mod cli;`) and a bare `exit(1)` after
 `use std::process::exit` are not detected.
+
+## concord-lint ratchet rules
+
+The lint tool reports `ratchet.result_string`, `ratchet.dropped_result`,
+`ratchet.error_to_string`, `ratchet.untraced_spawn`, and `ratchet.raw_channel`.
+These findings use the same counting baseline mechanism as the existing rules;
+test files and `#[cfg(test)]` modules are skipped.
 
 ## Checks
 

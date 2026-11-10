@@ -90,7 +90,7 @@ facts:
   - proto-consumer-test/proto/consumer/v1/events.proto
   - proto-consumer-test/src/lib.rs
 - id: trace-context-inject-and-join
-  assertion: propagation::inject writes traceparent (and tracestate only when non-empty) from the current span and writes nothing without a valid span context; set_parent and set_parent_from_env (which reads only traceparent from TRACEPARENT) parent a span only on a valid traceparent; the gRPC client and server layers use this.
+  assertion: propagation::inject writes traceparent (and tracestate only when non-empty) from the current span and writes nothing without a valid span context; set_parent and set_parent_from_env (which reads traceparent from TRACEPARENT and baggage from BAGGAGE, not tracestate) parent a span only on a valid traceparent; the gRPC client and server layers use this.
   evidence:
   - concord-telemetry/src/propagation.rs
   - concord-telemetry/src/grpc.rs

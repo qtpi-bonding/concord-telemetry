@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 pub enum AttrValue {
     Str(String),
     I64(i64),
-    U64(u64),
     F64(f64),
     Bool(bool),
 }

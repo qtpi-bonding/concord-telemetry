@@ -24,8 +24,11 @@ impl tracing::field::Visit for Visitor {
             .insert(field.name().to_string(), AttrValue::I64(value));
     }
     fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
-        self.0
-            .insert(field.name().to_string(), AttrValue::U64(value));
+        // The export path has no unsigned type either: it widens to i64.
+        let value = i64::try_from(value)
+            .map(AttrValue::I64)
+            .unwrap_or_else(|_| AttrValue::Str(value.to_string()));
+        self.0.insert(field.name().to_string(), value);
     }
     fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
         self.0
