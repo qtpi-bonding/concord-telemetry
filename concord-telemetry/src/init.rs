@@ -415,7 +415,7 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
     }
 
     crate::carrier::set_otel_active(traces.is_some());
-    panic::install(logs.clone(), traces.clone());
+    panic::install(logs.clone(), traces.clone(), config.flush_deadline);
     if let Some(value) = unknown_error_text.as_deref() {
         crate::error::warn_unknown_error_text(value);
     }

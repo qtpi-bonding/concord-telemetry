@@ -1,30 +1,36 @@
-use crate::{deadline::run_with_deadline, EVENT_TARGET};
-use coded_error::{fingerprint, ErrorClass};
+use crate::coded::emit_coded;
+use crate::deadline::run_exclusive;
+use coded_error::ErrorClass;
 use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 pub const PANIC_CODE: &str = "concord.process.panic";
-const PANIC_FLUSH: Duration = Duration::from_secs(2);
 
-pub(crate) fn install(logs: Option<SdkLoggerProvider>, traces: Option<SdkTracerProvider>) {
+/// A flush started by a panic. At most one is in flight: a panic while it
+/// runs does not start another, and one after it finishes does.
+static FLUSHING: AtomicBool = AtomicBool::new(false);
+
+/// Installs the panic hook. Each panic is recorded, then both providers are
+/// flushed for at most `deadline` (`Config::flush_deadline`).
+pub(crate) fn install(
+    logs: Option<SdkLoggerProvider>,
+    traces: Option<SdkTracerProvider>,
+    deadline: Duration,
+) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let source = info
             .location()
             .map(|location| location.file())
             .unwrap_or("unknown");
-        let class = ErrorClass::Unknown;
-        let digest = fingerprint(PANIC_CODE, class, source);
         let emit = || {
-            tracing::event!(
-                    name: "error",
-                target: EVENT_TARGET,
+            emit_coded!(
                 tracing::Level::ERROR,
-                error.code = PANIC_CODE,
-                error.class = class.as_str(),
-                error.fingerprint = digest.as_str(),
-                error.source = source,
-            );
+                PANIC_CODE,
+                ErrorClass::Unknown,
+                source
+            )
         };
         match info.location() {
             Some(location) => {
@@ -36,7 +42,7 @@ pub(crate) fn install(logs: Option<SdkLoggerProvider>, traces: Option<SdkTracerP
         let log_provider = logs.clone();
         let trace_provider = traces.clone();
         if log_provider.is_some() || trace_provider.is_some() {
-            run_with_deadline(PANIC_FLUSH, move || {
+            run_exclusive(&FLUSHING, deadline, move || {
                 if let Some(provider) = log_provider {
                     let _ = provider.force_flush();
                 }
