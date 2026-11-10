@@ -199,7 +199,8 @@ fn oversize_tracestate_is_dropped_once() {
     set_otel_active(true);
     let origin = info_span!("a2-ts-origin");
     let mut sent = origin.in_scope(carrier::capture);
-    sent.tracestate = Some(format!("v={}", "x".repeat(300)));
+    // One entry over 128 characters and over the 512 cap.
+    sent.tracestate = Some(format!("v={}", "x".repeat(600)));
     let span = info_span!("a2-ts");
     carrier::extract_required("test.hop", &span, &sent);
     set_otel_active(false);
@@ -213,4 +214,62 @@ fn oversize_tracestate_is_dropped_once() {
     assert!(captured
         .errors_where(|e| e.code == TRACE_MISSING_CODE)
         .is_empty());
+}
+
+#[test]
+fn tracestate_over_512_drops_long_entries_first_then_whole_entries_from_the_end() {
+    let captured = capture_exclusive();
+    set_otel_active(true);
+    let origin = info_span!("a2-ts-trim-origin");
+    let mut sent = origin.in_scope(carrier::capture);
+    let normal: Vec<String> = (0..5)
+        .map(|i| format!("k{i}={}", "v".repeat(115)))
+        .collect();
+    let long = format!("big={}", "y".repeat(140));
+    // 5 x 119 + 144 + 5 commas: over 512 and still over without the long one.
+    sent.tracestate = Some(format!(
+        "{},{},{}",
+        normal[..2].join(","),
+        long,
+        normal[2..].join(",")
+    ));
+    let span = info_span!("a2-ts-trim");
+    carrier::extract_required("test.hop", &span, &sent);
+    set_otel_active(false);
+    let joined = span.in_scope(carrier::capture);
+    assert_eq!(trace_id_of(&joined), trace_id_of(&sent));
+    assert_eq!(
+        joined.tracestate.as_deref(),
+        Some(normal[..4].join(",").as_str())
+    );
+    assert_eq!(
+        dropped_headers(&captured),
+        vec![AttrValue::Str("tracestate".into())]
+    );
+
+    // Under the cap nothing is touched, long entries included.
+    let mut fits = origin.in_scope(carrier::capture);
+    fits.tracestate = Some(format!("a=1,{long},b=2"));
+    let span = info_span!("a2-ts-fits");
+    carrier::parent_on(&span, &fits);
+    assert_eq!(span.in_scope(carrier::capture).tracestate, fits.tracestate);
+}
+
+#[test]
+fn parent_on_replaces_the_spans_labels_with_the_carriers() {
+    let _captured = capture_exclusive();
+    let parent = info_span!("a2-replace-parent");
+    parent.in_scope(|| context::add("action_id", "inherited"));
+    let child = parent.in_scope(|| info_span!("a2-replace-child"));
+    carrier::parent_on(
+        &child,
+        &TraceCarrier {
+            baggage: Some("action_id=carried".into()),
+            ..TraceCarrier::default()
+        },
+    );
+    assert_eq!(
+        child.in_scope(carrier::capture).baggage.as_deref(),
+        Some("action_id=carried")
+    );
 }

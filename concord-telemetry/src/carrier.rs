@@ -5,10 +5,12 @@
 //! carrier, the extract helpers change nothing, and `concord.trace.missing`
 //! is never recorded.
 
+use crate::coded::emit_coded;
+use crate::propagation::Fields;
 use crate::{baggage, init::EVENT_TARGET, propagation};
-use coded_error::{fingerprint, ErrorClass};
+use coded_error::ErrorClass;
 use concord_telemetry_proto::TraceCarrier;
-use opentelemetry::propagation::{Extractor, TextMapPropagator};
+use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use std::collections::HashMap;
@@ -25,7 +27,10 @@ pub const BAGGAGE_DROPPED_CODE: &str = "concord.trace.baggage_dropped";
 /// a `tracestate` is over its cap. The field `header` names which.
 pub const CARRIER_DROPPED_CODE: &str = "concord.trace.carrier_dropped";
 
-const TRACESTATE_MAX: usize = 256;
+/// W3C Trace Context: a `tracestate` over this many characters is shortened.
+const TRACESTATE_MAX: usize = 512;
+/// When shortening, entries longer than this go first.
+const TRACESTATE_ENTRY_MAX: usize = 128;
 
 static OTEL_ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -91,11 +96,12 @@ fn getter(c: &TraceCarrier) -> impl Fn(&str) -> Option<String> + '_ {
     }
 }
 
-/// Makes `span` a child of the carrier's trace and takes its baggage. Call it
-/// before anything else touches `span`'s OpenTelemetry context: before it is
-/// first entered, and before any `context::add` on it, since both fix the
-/// span's trace and a later `parent_on` is then ignored. A carrier without a
-/// valid `traceparent` leaves the span's contextual parent in place.
+/// Makes `span` a child of the carrier's trace and replaces the span's labels
+/// with the carrier's baggage, when it has a `baggage` header. Call it before
+/// `span` is first entered: entering fixes its trace (`context::add` needs the
+/// span entered, so it does too), and a later `parent_on` cannot re-parent,
+/// though it still replaces the labels. A carrier without a valid
+/// `traceparent` leaves the span's contextual parent in place.
 pub fn parent_on(span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
 }
@@ -172,68 +178,66 @@ pub(crate) fn extract_context(get: impl Fn(&str) -> Option<String>) -> opentelem
     if let Some(value) = get("traceparent") {
         fields.insert("traceparent".to_owned(), value);
     }
-    if let Some(value) = get("tracestate").filter(|v| v.len() <= TRACESTATE_MAX) {
-        fields.insert("tracestate".to_owned(), value);
+    if let Some(value) = get("tracestate") {
+        let value = shrink_tracestate(&value);
+        if !value.is_empty() {
+            fields.insert("tracestate".to_owned(), value.into_owned());
+        }
     }
     TraceContextPropagator::new().extract(&Fields(&fields))
 }
 
-struct Fields<'a>(&'a HashMap<String, String>);
-
-impl Extractor for Fields<'_> {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.0.get(key).map(String::as_str)
+/// A `tracestate` within the cap, as W3C says to shorten one: over
+/// `TRACESTATE_MAX`, entries longer than `TRACESTATE_ENTRY_MAX` go first, then
+/// whole entries from the end. Under the cap it is returned as it is.
+pub(crate) fn shrink_tracestate(value: &str) -> std::borrow::Cow<'_, str> {
+    if value.len() <= TRACESTATE_MAX {
+        return std::borrow::Cow::Borrowed(value);
     }
-
-    fn keys(&self) -> Vec<&str> {
-        self.0.keys().map(String::as_str).collect()
+    let mut kept: Vec<&str> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty() && entry.len() <= TRACESTATE_ENTRY_MAX)
+        .collect();
+    let joined = |entries: &[&str]| {
+        entries
+            .iter()
+            .map(|e| e.len() + 1)
+            .sum::<usize>()
+            .saturating_sub(1)
+    };
+    while joined(&kept) > TRACESTATE_MAX {
+        kept.pop();
     }
+    std::borrow::Cow::Owned(kept.join(","))
 }
 
 fn emit_trace_missing(hop: &'static str) {
-    let class = ErrorClass::Infrastructure;
-    let source = module_path!();
-    let digest = fingerprint(TRACE_MISSING_CODE, class, source);
-    tracing::event!(
-        name: "error",
-        target: EVENT_TARGET,
+    emit_coded!(
         tracing::Level::WARN,
-        error.code = TRACE_MISSING_CODE,
-        error.class = class.as_str(),
-        error.fingerprint = digest.as_str(),
-        error.source = source,
-        hop = hop,
+        TRACE_MISSING_CODE,
+        ErrorClass::Infrastructure,
+        module_path!(),
+        hop = hop
     );
 }
 
 pub(crate) fn emit_baggage_dropped(count: usize) {
-    let class = ErrorClass::Logical;
-    let source = module_path!();
-    let digest = fingerprint(BAGGAGE_DROPPED_CODE, class, source);
-    tracing::event!(
-        name: "error",
-        target: EVENT_TARGET,
+    emit_coded!(
         tracing::Level::WARN,
-        error.code = BAGGAGE_DROPPED_CODE,
-        error.class = class.as_str(),
-        error.fingerprint = digest.as_str(),
-        error.source = source,
-        dropped = count as i64,
+        BAGGAGE_DROPPED_CODE,
+        ErrorClass::Logical,
+        module_path!(),
+        dropped = count as i64
     );
 }
 
 fn emit_carrier_dropped(header: &'static str) {
-    let class = ErrorClass::Logical;
-    let source = module_path!();
-    let digest = fingerprint(CARRIER_DROPPED_CODE, class, source);
-    tracing::event!(
-        name: "error",
-        target: EVENT_TARGET,
+    emit_coded!(
         tracing::Level::WARN,
-        error.code = CARRIER_DROPPED_CODE,
-        error.class = class.as_str(),
-        error.fingerprint = digest.as_str(),
-        error.source = source,
-        header = header,
+        CARRIER_DROPPED_CODE,
+        ErrorClass::Logical,
+        module_path!(),
+        header = header
     );
 }

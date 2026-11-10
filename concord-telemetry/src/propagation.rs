@@ -6,7 +6,7 @@
 //! is injected and `set_parent` does nothing.
 
 use crate::{baggage, carrier};
-use opentelemetry::propagation::{Injector, TextMapPropagator};
+use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use std::collections::HashMap;
@@ -85,10 +85,24 @@ pub fn set_parent_from_env(span: &tracing::Span) {
 /// can use it. The counterpart of `set_parent_from_env`.
 pub use concord_telemetry_proto::inject_env;
 
-struct Carrier<'a>(&'a mut HashMap<String, String>);
+/// Injects into a map.
+pub(crate) struct Carrier<'a>(pub &'a mut HashMap<String, String>);
 
 impl Injector for Carrier<'_> {
     fn set(&mut self, key: &str, value: String) {
         self.0.insert(key.to_owned(), value);
+    }
+}
+
+/// Extracts from a map.
+pub(crate) struct Fields<'a>(pub &'a HashMap<String, String>);
+
+impl Extractor for Fields<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(String::as_str)
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(String::as_str).collect()
     }
 }

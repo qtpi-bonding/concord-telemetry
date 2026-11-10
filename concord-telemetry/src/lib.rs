@@ -1,5 +1,6 @@
 mod baggage;
 pub mod carrier;
+mod coded;
 mod deadline;
 pub mod error;
 mod event;
@@ -36,8 +37,8 @@ pub use concord_telemetry_proto::TraceCarrier;
 pub use concord_telemetry_derive::Event;
 pub use error::{error_text, set_error_text, ErrorText};
 pub use event::{AttrValue, Attrs, Event, RebuildError};
-pub use label_collapse::LabelCollapse;
 pub use init::{init, BuildInfo, Config, Guard, InitError, LocalOutput, EVENT_TARGET};
+pub use label_collapse::LabelCollapse;
 pub use panic::PANIC_CODE;
 pub use principal::{Principal, PrincipalKind, Verification};
 

@@ -33,8 +33,9 @@
 //! runs (`Layered::enter` calls the inner subscriber first), so
 //! `Span::current()` is the entered span there.
 
+use crate::propagation::{Carrier, Fields};
 use opentelemetry::baggage::BaggageExt;
-use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
+use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::{Context, Key, Value};
 use opentelemetry_sdk::propagation::BaggagePropagator;
 use std::collections::HashMap;
@@ -53,7 +54,7 @@ pub(crate) const MAX_HEADER: usize = 8192;
 
 /// The attribute prefix under which labels are stamped. Reserved: no label
 /// or incoming baggage key may start with it.
-pub(crate) const LABEL_PREFIX: &str = "concord.label.";
+pub(crate) use concord_fields::LABEL_PREFIX;
 
 #[cfg(feature = "testing")]
 pub(crate) static STAMPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -279,7 +280,6 @@ pub(crate) fn ingest(span: &Span, header: &str) {
     set(span, kept);
 }
 
-
 /// The valid entries of a `baggage` header, and how many were dropped.
 pub(crate) fn parse(header: &str) -> (Vec<(String, String)>, usize) {
     let segments: Vec<&str> = header.split(',').filter(|s| !s.trim().is_empty()).collect();
@@ -335,7 +335,7 @@ pub(crate) fn format(entries: &[(String, String)]) -> Option<String> {
         let context =
             Context::new().with_baggage([opentelemetry::KeyValue::new(key.clone(), value.clone())]);
         let mut out = HashMap::new();
-        BaggagePropagator::new().inject_context(&context, &mut Out(&mut out));
+        BaggagePropagator::new().inject_context(&context, &mut Carrier(&mut out));
         let Some(piece) = out.remove("baggage").filter(|p| !p.is_empty()) else {
             continue;
         };
@@ -354,24 +354,4 @@ pub(crate) fn format(entries: &[(String, String)]) -> Option<String> {
         crate::carrier::emit_baggage_dropped(left_out);
     }
     (!header.is_empty()).then_some(header)
-}
-
-struct Fields<'a>(&'a HashMap<String, String>);
-
-impl Extractor for Fields<'_> {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.0.get(key).map(String::as_str)
-    }
-
-    fn keys(&self) -> Vec<&str> {
-        self.0.keys().map(String::as_str).collect()
-    }
-}
-
-struct Out<'a>(&'a mut HashMap<String, String>);
-
-impl Injector for Out<'_> {
-    fn set(&mut self, key: &str, value: String) {
-        self.0.insert(key.to_owned(), value);
-    }
 }
