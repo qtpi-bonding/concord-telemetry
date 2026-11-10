@@ -599,9 +599,23 @@ fn the_reserved_label_prefix_is_not_a_field_name() {
         ),
         vec!["reserved-label-prefix"]
     );
+    for name in [
+        "concord.label.x",
+        "concord.trace.y",
+        "concord.label_conflicts",
+    ] {
+        assert_eq!(Registry::shared().check(name), FieldVerdict::ReservedPrefix);
+    }
     assert_eq!(
-        Registry::shared().check("concord.label.x"),
-        FieldVerdict::ReservedPrefix
+        scan(
+            "src/lib.rs",
+            "use tracing::info; fn f() { info!(\"concord.trace.hop\" = 1, \"x\"); }"
+        ),
+        vec!["reserved-label-prefix"]
+    );
+    assert_eq!(
+        Registry::shared().check("concordance"),
+        FieldVerdict::Unregistered
     );
 }
 

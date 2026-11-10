@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use concord_fields::FieldDef;
-use concord_fields::LABEL_PREFIX;
+use concord_fields::RESERVED_NAMESPACE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldVerdict {
     Ok,
     Unregistered,
     Never,
-    /// Named with the reserved `concord.label.` prefix.
+    /// In the reserved `concord.` namespace.
     ReservedPrefix,
 }
 
@@ -52,7 +52,7 @@ impl Registry {
     }
 
     pub fn check(&self, name: &str) -> FieldVerdict {
-        if name.starts_with(LABEL_PREFIX) {
+        if name.starts_with(RESERVED_NAMESPACE) {
             FieldVerdict::ReservedPrefix
         } else if self.never.contains(name) {
             FieldVerdict::Never

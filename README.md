@@ -285,7 +285,7 @@ Label rules: a label (a field marked `label = true` in `fields.toml`, or in your
 `fields.local.toml`) must not be recorded through Debug, by `?` in a span macro or
 `#[instrument(fields(..))]`, or implicitly as an `#[instrument]` parameter whose
 type tracing-attributes records through Debug and that is not skipped or shadowed by
-`fields(..)` (`label-debug`); and the prefix `concord.label.` is not a field name
+`fields(..)` (`label-debug`); and no field is in the reserved `concord.` namespace
 (`reserved-label-prefix`). Known limits: other span-macro and `#[instrument]` fields are not checked against the registry;
 `process::exit` in modules of a binary (`mod cli;`) and a bare `exit(1)` after
 `use std::process::exit` are not detected.

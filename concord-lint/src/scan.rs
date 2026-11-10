@@ -809,7 +809,7 @@ impl Scanner<'_> {
             let Some(field) = recorded(&segment) else {
                 continue;
             };
-            if field.name.starts_with(concord_fields::LABEL_PREFIX) {
+            if field.name.starts_with(concord_fields::RESERVED_NAMESPACE) {
                 self.add(mac, "reserved-label-prefix", &field.name);
             } else if field.debug && self.registry.is_label(&field.name) {
                 self.add_label_debug(mac.span(), &field.name, "span macro");
@@ -864,7 +864,10 @@ impl Scanner<'_> {
                                 if recorded.debug && self.registry.is_label(&recorded.name) {
                                     self.add_label_debug(span, &recorded.name, "instrument fields");
                                 }
-                                if recorded.name.starts_with(concord_fields::LABEL_PREFIX) {
+                                if recorded
+                                    .name
+                                    .starts_with(concord_fields::RESERVED_NAMESPACE)
+                                {
                                     self.add_span(span, "reserved-label-prefix", &recorded.name);
                                 }
                                 recorded.name

@@ -9,9 +9,12 @@ use std::collections::{BTreeMap, BTreeSet};
 /// The registry shared by every repo, embedded at build time.
 pub const SHARED: &str = include_str!("../../fields.toml");
 
-/// The attribute prefix under which concord-telemetry stamps labels. No field
-/// or label may be named with it.
+/// The attribute prefix under which concord-telemetry stamps labels.
 pub const LABEL_PREFIX: &str = "concord.label.";
+
+/// The namespace reserved for concord-telemetry's own keys (`concord.label.*`,
+/// `concord.label_conflicts`, ...). No field or baggage key may be in it.
+pub const RESERVED_NAMESPACE: &str = "concord.";
 
 /// One registered field.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,14 +53,16 @@ struct Never {
     names: Vec<String>,
 }
 
-/// Parses a registry file. A field named with the reserved label prefix is an
+/// Parses a registry file. A field in the reserved `concord.` namespace is an
 /// error.
 pub fn parse(source: &str) -> Result<Parsed, String> {
     let document: Document = toml::from_str(source).map_err(|error| error.to_string())?;
     let mut names = BTreeMap::new();
     for (name, definition) in document.fields {
-        if name.starts_with(LABEL_PREFIX) {
-            return Err(format!("{name} uses the reserved prefix {LABEL_PREFIX}"));
+        if name.starts_with(RESERVED_NAMESPACE) {
+            return Err(format!(
+                "{name} is in the reserved namespace {RESERVED_NAMESPACE}"
+            ));
         }
         names.insert(
             name,
@@ -104,9 +109,12 @@ mod tests {
     }
 
     #[test]
-    fn the_reserved_prefix_is_not_a_field_name() {
-        let error = parse("[fields]\n\"concord.label.x\" = { meaning = \"x\" }\n").unwrap_err();
-        assert!(error.contains("reserved"), "{error}");
+    fn the_reserved_namespace_is_not_a_field_name() {
+        for name in ["concord.label.x", "concord.trace.y", "concord.anything"] {
+            let source = format!("[fields]\n\"{name}\" = {{ meaning = \"x\" }}\n");
+            let error = parse(&source).unwrap_err();
+            assert!(error.contains("reserved"), "{error}");
+        }
     }
 
     #[test]
