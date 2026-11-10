@@ -40,7 +40,9 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::{Context, Key, Value};
 use opentelemetry_sdk::propagation::BaggagePropagator;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
+#[cfg(feature = "testing")]
+use std::sync::{Mutex, PoisonError};
 use tracing::span::Id;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
