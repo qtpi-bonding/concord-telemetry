@@ -15,21 +15,31 @@ fn shared_registry_contains_seed_and_never_names() {
 
 #[test]
 fn local_registry_adds_names_and_rejects_conflicts() {
-    let local = "[fields]\nnode_kind = { type = \"str\", meaning = \"kind\" }";
+    let local = "[fields]\nnode_kind = { meaning = \"kind\" }";
     let registry = Registry::shared()
         .with_local(local)
         .expect("overlay should parse");
     assert_eq!(registry.check("node_kind"), FieldVerdict::Ok);
 
-    let shadow = "[fields]\naction_id = { type = \"str\", meaning = \"bad\" }";
+    let shadow = "[fields]\naction_id = { meaning = \"bad\" }";
     let error = Registry::shared()
         .with_local(shadow)
         .expect_err("shadow must fail");
     assert!(error.contains("shadows"));
 
-    let never = "[fields]\nstdout = { type = \"str\", meaning = \"bad\" }";
+    let never = "[fields]\nstdout = { meaning = \"bad\" }";
     let error = Registry::shared()
         .with_local(never)
         .expect_err("never name must fail");
     assert!(error.contains("never"));
+}
+
+#[test]
+fn labels_are_the_fields_marked_label_true() {
+    let registry = Registry::shared();
+    assert!(registry.is_label("request_id"));
+    assert!(!registry.is_label("room_id"));
+    let local = "[fields]\nthread_id = { meaning = \"x\", label = true }";
+    let registry = registry.with_local(local).expect("overlay parses");
+    assert!(registry.is_label("thread_id"));
 }

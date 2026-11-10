@@ -3,8 +3,6 @@ use proc_macro2::Span;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Path, Type};
 
-const REGISTRY: &str = include_str!("../../fields.toml");
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     String,
@@ -102,6 +100,10 @@ fn is_optional(ty: &Type) -> bool {
 fn is_repeated(ty: &Type) -> bool {
     inner_type(ty, "Vec").is_some()
 }
+/// A field of type `<crate>::Timestamp` or `<crate>::Duration` is a protobuf
+/// well-known type when `<crate>` is one of the crates below. `identity_crypto`
+/// is named here because its generated messages carry the same types; add a
+/// crate to this list to support another.
 fn is_timestamp(ty: &Type, name: &str) -> bool {
     let Some(segments) = path_segments(ty) else {
         return false;
@@ -118,26 +120,9 @@ fn is_principal(ty: &Type) -> bool {
     segments.iter().any(|s| s == "concord_telemetry")
         && segments.last().map(String::as_str) == Some("Principal")
 }
+/// The never-log names, from the one `fields.toml` parser.
 fn never_names() -> Vec<String> {
-    let Some(section) = REGISTRY.split("[never]").nth(1) else {
-        return Vec::new();
-    };
-    let Some(line) = section
-        .lines()
-        .find(|l| l.trim_start().starts_with("names ="))
-    else {
-        return Vec::new();
-    };
-    line.split('[')
-        .nth(1)
-        .unwrap_or("")
-        .split(']')
-        .next()
-        .unwrap_or("")
-        .split(',')
-        .map(|s| s.trim().trim_matches('"').to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+    concord_fields::shared().never.into_iter().collect()
 }
 
 #[proc_macro_derive(Event, attributes(concord_event))]
@@ -491,21 +476,18 @@ fn scalar_value(
         }
         Kind::I32 => quote!(match #get {
             ::concord_telemetry::AttrValue::I64(v) => ::core::convert::TryFrom::try_from(*v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?,
-            ::concord_telemetry::AttrValue::U64(v) => ::core::convert::TryFrom::try_from(*v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?,
             _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())),
         }),
         Kind::I64 => quote!(match #get {
             ::concord_telemetry::AttrValue::I64(v) => *v,
-            ::concord_telemetry::AttrValue::U64(v) => ::core::convert::TryFrom::try_from(*v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?,
             _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())),
         }),
         Kind::U32 => quote!(match #get {
             ::concord_telemetry::AttrValue::I64(v) => ::core::convert::TryFrom::try_from(*v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?,
-            ::concord_telemetry::AttrValue::U64(v) => ::core::convert::TryFrom::try_from(*v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?,
             _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())),
         }),
         Kind::U64 => {
-            quote!(match #get { ::concord_telemetry::AttrValue::Str(v) => v.parse().map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?, ::concord_telemetry::AttrValue::I64(v) => ::core::convert::TryFrom::try_from(*v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?, ::concord_telemetry::AttrValue::U64(v) => *v, _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())) })
+            quote!(match #get { ::concord_telemetry::AttrValue::Str(v) => v.parse().map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?, ::concord_telemetry::AttrValue::I64(v) => ::core::convert::TryFrom::try_from(*v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?, _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())) })
         }
         Kind::F32 | Kind::F64 => {
             quote!(match #get { ::concord_telemetry::AttrValue::F64(v) => *v as _, ::concord_telemetry::AttrValue::I64(v) => *v as _, _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())) })

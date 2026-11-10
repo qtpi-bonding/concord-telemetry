@@ -1,36 +1,37 @@
 # Shared field-name registry. Adding a name is a one-line PR.
-# type: str | int | bool | float | duration | timestamp
+# label = true: the field is a baggage label (carried across spans and processes, stamped
+# as concord.label.<name>); it must not be recorded through Debug.
 [fields]
-action_id = { type = "str", meaning = "grorg Action id" }
-session_id = { type = "str", meaning = "grorg Session id" }
-elapsed_ms = { type = "int", meaning = "Elapsed wall time in milliseconds" }
-agent_id = { type = "str", meaning = "Agent principal id (opaque string)" }
-delivery_id = { type = "str", meaning = "multimatrix delivery id; stable across resends" }
-room_id = { type = "str", meaning = "multimatrix room id" }
-message_id = { type = "str", meaning = "Room message id" }
-machine_id = { type = "str", meaning = "Machine id" }
-offline_machine_id = { type = "str", meaning = "Machine id that went offline" }
-batch_sequence = { type = "int", meaning = "Mailbox batch sequence number" }
-context = { type = "str", meaning = "Short fixed label for where a log comes from" }
-node_id = { type = "str", meaning = "archegraph DAG node id" }
-build_id = { type = "str", meaning = "archegraph build id" }
-blueprint_name = { type = "str", meaning = "archegraph Blueprint name" }
-turn_id = { type = "str", meaning = "Id of one agent turn" }
-request_id = { type = "str", meaning = "Id of one request" }
-header = { type = "str", meaning = "Name of a carrier header that was dropped" }
-hop = { type = "str", meaning = "Name of a boundary a trace crosses, as dotted words" }
-dropped = { type = "int", meaning = "Count of entries dropped from a carrier" }
-error_text = { type = "str", meaning = "A CONCORD_ERROR_TEXT value that was not recognised" }
-instance_id = { type = "str", meaning = "Instance id" }
-label = { type = "str", meaning = "Short fixed label" }
-error = { type = "str", meaning = "Display of an error, local debug logs only (rule 5)" }
-source_record_id = { type = "str", meaning = "Id of the record an event describes" }
-"error.type" = { type = "str", meaning = "OTel semconv: error type" }
-"rpc.method" = { type = "str", meaning = "OTel semconv: RPC method" }
-"http.request.method" = { type = "str", meaning = "OTel semconv: HTTP method" }
-"code.file.path" = { type = "str", meaning = "OTel semconv: source file; added to every exported log record and span, never set by hand" }
-"code.line.number" = { type = "int", meaning = "OTel semconv: source line; added to every exported log record and span, never set by hand" }
-"code.module.name" = { type = "str", meaning = "OTel semconv: module path; added to every exported log record and span, never set by hand" }
+action_id = { meaning = "grorg Action id", label = true }
+session_id = { meaning = "grorg Session id", label = true }
+elapsed_ms = { meaning = "Elapsed wall time in milliseconds" }
+agent_id = { meaning = "Agent principal id (opaque string)", label = true }
+delivery_id = { meaning = "multimatrix delivery id; stable across resends", label = true }
+room_id = { meaning = "multimatrix room id" }
+message_id = { meaning = "Room message id", label = true }
+machine_id = { meaning = "Machine id", label = true }
+offline_machine_id = { meaning = "Machine id that went offline" }
+batch_sequence = { meaning = "Mailbox batch sequence number" }
+context = { meaning = "Short fixed label for where a log comes from" }
+node_id = { meaning = "archegraph DAG node id" }
+build_id = { meaning = "archegraph build id" }
+blueprint_name = { meaning = "archegraph Blueprint name" }
+turn_id = { meaning = "Id of one agent turn", label = true }
+request_id = { meaning = "Id of one request", label = true }
+header = { meaning = "Name of a carrier header that was dropped" }
+hop = { meaning = "Name of a boundary a trace crosses, as dotted words" }
+dropped = { meaning = "Count of entries dropped from a carrier" }
+error_text = { meaning = "A CONCORD_ERROR_TEXT value that was not recognised" }
+instance_id = { meaning = "Instance id", label = true }
+label = { meaning = "Short fixed label" }
+error = { meaning = "Display of an error, local debug logs only (rule 5)" }
+source_record_id = { meaning = "Id of the record an event describes" }
+"error.type" = { meaning = "OTel semconv: error type" }
+"rpc.method" = { meaning = "OTel semconv: RPC method" }
+"http.request.method" = { meaning = "OTel semconv: HTTP method" }
+"code.file.path" = { meaning = "OTel semconv: source file; added to every exported log record and span, never set by hand" }
+"code.line.number" = { meaning = "OTel semconv: source line; added to every exported log record and span, never set by hand" }
+"code.module.name" = { meaning = "OTel semconv: module path; added to every exported log record and span, never set by hand" }
 
 [never]
 names = ["content", "body", "stdout", "stderr", "prompt", "env", "password", "token", "secret"]

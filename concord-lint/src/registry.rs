@@ -1,18 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Deserialize;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FieldDef {
-    pub ty: String,
-    pub meaning: String,
-}
+pub use concord_fields::FieldDef;
+use concord_fields::LABEL_PREFIX;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldVerdict {
     Ok,
     Unregistered,
     Never,
+    /// Named with the reserved `concord.label.` prefix.
+    ReservedPrefix,
 }
 
 #[derive(Clone, Debug)]
@@ -21,34 +18,13 @@ pub struct Registry {
     pub never: BTreeSet<String>,
 }
 
-#[derive(Deserialize)]
-struct Document {
-    #[serde(default)]
-    fields: BTreeMap<String, Definition>,
-    #[serde(default)]
-    never: Never,
-}
-
-#[derive(Deserialize)]
-struct Definition {
-    #[serde(rename = "type")]
-    ty: String,
-    meaning: String,
-}
-
-#[derive(Default, Deserialize)]
-struct Never {
-    #[serde(default)]
-    names: Vec<String>,
-}
-
 impl Registry {
     pub fn shared() -> Registry {
-        parse(include_str!("../../fields.toml")).expect("embedded registry is valid")
+        from_parsed(concord_fields::shared())
     }
 
     pub fn with_local(mut self, source: &str) -> Result<Registry, String> {
-        let local = parse(source)?;
+        let local = from_parsed(concord_fields::parse(source)?);
         for name in local.names.keys() {
             if local.never.contains(name) {
                 return Err(format!("{name} is registered and never-log"));
@@ -70,8 +46,15 @@ impl Registry {
         Ok(self)
     }
 
+    /// True when `name` is registered with `label = true`.
+    pub fn is_label(&self, name: &str) -> bool {
+        self.names.get(name).is_some_and(|def| def.label)
+    }
+
     pub fn check(&self, name: &str) -> FieldVerdict {
-        if self.never.contains(name) {
+        if name.starts_with(LABEL_PREFIX) {
+            FieldVerdict::ReservedPrefix
+        } else if self.never.contains(name) {
             FieldVerdict::Never
         } else if self.names.contains_key(name) || reserved(name) {
             FieldVerdict::Ok
@@ -81,25 +64,11 @@ impl Registry {
     }
 }
 
-fn parse(source: &str) -> Result<Registry, String> {
-    let document: Document = toml::from_str(source).map_err(|error| error.to_string())?;
-    let names = document
-        .fields
-        .into_iter()
-        .map(|(name, value)| {
-            (
-                name,
-                FieldDef {
-                    ty: value.ty,
-                    meaning: value.meaning,
-                },
-            )
-        })
-        .collect();
-    Ok(Registry {
-        names,
-        never: document.never.names.into_iter().collect(),
-    })
+fn from_parsed(parsed: concord_fields::Parsed) -> Registry {
+    Registry {
+        names: parsed.names,
+        never: parsed.never,
+    }
 }
 
 fn reserved(name: &str) -> bool {

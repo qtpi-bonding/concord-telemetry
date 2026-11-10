@@ -186,22 +186,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "concord-lint"
+name = "concord-fields"
 version = "0.1.0"
 dependencies = [
- "proc-macro2",
- "quote",
  "serde",
- "syn 2.0.119",
  "toml 0.8.23",
 ]
 
 [[package]]
+name = "concord-lint"
+version = "0.1.0"
+dependencies = [
+ "concord-fields",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "concord-telemetry"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "coded-error",
+ "concord-fields",
  "concord-telemetry-derive",
  "concord-telemetry-proto",
  "http",
@@ -212,6 +220,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "pbjson-types",
+ "pin-project-lite",
  "prost 0.13.5",
  "prost 0.14.4",
  "prost-types",
@@ -232,6 +241,7 @@ dependencies = [
 name = "concord-telemetry-derive"
 version = "0.1.0"
 dependencies = [
+ "concord-fields",
  "proc-macro2",
  "quote",
  "syn 2.0.119",

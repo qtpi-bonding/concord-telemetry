@@ -486,3 +486,121 @@ fn events_with_only_fields_have_no_message_to_check() {
     );
     assert!(rules.is_empty(), "{rules:?}");
 }
+
+#[test]
+fn a_match_scrutinee_and_guard_are_scanned() {
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "use tracing::info; fn f() { match { info!(widget = 1, \"x\"); 1 } { _ => {} } }"
+        ),
+        vec!["unregistered-field"]
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "use tracing::info; fn f(a: u8) { match a { 1 if { info!(widget = 1, \"x\"); true } => {} _ => {} } }"
+        ),
+        vec!["unregistered-field"]
+    );
+    assert_eq!(
+        scan("src/lib.rs", "fn f() { match work().ok() { _ => {} } }"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "fn f() { match tokio::sync::mpsc::channel(1) { _ => {} } }"
+        ),
+        vec!["ratchet.raw_channel"]
+    );
+}
+
+#[test]
+fn a_label_recorded_through_debug_in_a_span_macro_is_reported() {
+    for source in [
+        "use tracing::info_span; fn f(id: u8) { let _ = info_span!(\"x\", request_id = ?id); }",
+        "fn f(request_id: u8) { let _ = tracing::info_span!(\"x\", ?request_id); }",
+        "fn f(id: u8) { let _ = tracing::span!(tracing::Level::INFO, \"x\", turn_id = ?id); }",
+    ] {
+        assert_eq!(scan("src/lib.rs", source), vec!["label-debug"], "{source}");
+    }
+    for source in [
+        "fn f(id: u8) { let _ = tracing::info_span!(\"x\", request_id = %id); }",
+        "fn f(id: u8) { let _ = tracing::info_span!(\"x\", request_id = id); }",
+        "fn f(id: u8) { let _ = tracing::info_span!(\"x\", widget = ?id); }",
+        "fn f(id: u8) { let _ = tracing::info_span!(\"x\", request_id = tracing::field::Empty); }",
+    ] {
+        assert!(scan("src/lib.rs", source).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn a_label_parameter_recorded_through_debug_by_instrument_is_reported() {
+    // Not in TYPES_FOR_VALUE: recorded through Debug.
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "#[tracing::instrument] fn f(request_id: Uuid) {}"
+        ),
+        vec!["label-debug"]
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "#[instrument] fn f(turn_id: Option<String>) {}"
+        ),
+        vec!["label-debug"]
+    );
+    // str, String, integers and references to them are recorded by value.
+    for source in [
+        "#[instrument] fn f(request_id: &str) {}",
+        "#[instrument] fn f(request_id: String) {}",
+        "#[instrument] fn f(turn_id: &u64) {}",
+        "#[instrument] fn f(widget: Uuid) {}",
+        // Skipped, or shadowed by fields(..).
+        "#[instrument(skip(request_id))] fn f(request_id: Uuid) {}",
+        "#[instrument(skip_all)] fn f(request_id: Uuid) {}",
+        "#[instrument(fields(request_id = %request_id))] fn f(request_id: Uuid) {}",
+        "#[instrument(skip(a), fields(turn_id = 1))] fn f(a: u8, turn_id: Uuid) {}",
+        "fn f(request_id: Uuid) {}",
+    ] {
+        assert!(scan("src/lib.rs", source).is_empty(), "{source}");
+    }
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "#[instrument(fields(request_id = ?id))] fn f(id: Uuid) {}"
+        ),
+        vec!["label-debug"]
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "struct S; impl S { #[instrument] fn f(&self, action_id: Uuid) {} }"
+        ),
+        vec!["label-debug"]
+    );
+}
+
+#[test]
+fn the_reserved_label_prefix_is_not_a_field_name() {
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "use tracing::info; fn f() { info!(\"concord.label.action_id\" = 1, \"x\"); }"
+        ),
+        vec!["reserved-label-prefix"]
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "fn f() { let _ = tracing::info_span!(\"x\", \"concord.label.action_id\" = 1); }"
+        ),
+        vec!["reserved-label-prefix"]
+    );
+    assert_eq!(
+        Registry::shared().check("concord.label.x"),
+        FieldVerdict::ReservedPrefix
+    );
+}

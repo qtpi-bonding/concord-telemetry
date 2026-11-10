@@ -13,5 +13,4 @@ path = "src/main.rs"
 syn = { version = "2", features = ["full", "visit", "parsing", "extra-traits"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
-toml = "0.8"
-serde = { version = "1", features = ["derive"] }
+concord-fields = { path = "../concord-fields", version = "0.1.0" }
