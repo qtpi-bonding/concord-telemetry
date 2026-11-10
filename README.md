@@ -15,6 +15,26 @@ is the `Principal` message (hand-written prost types in `concord-telemetry`; the
 tiny `concord-telemetry-proto` crate exposes the proto's include path to
 consumers' `build.rs`, see "Importing `principal.proto`" below).
 
+## Breaking changes in 0.3.0
+
+- `AttrValue::U64` is gone (nothing produced it; the derive records `u64` as strings).
+- `carrier::link_from` no longer adopts the linked span's baggage. Callers that
+  relied on it add the labels they need with `context::add`: multimatrix-ops
+  `src/trace.rs:23` (`resend_span` relies on adoption), `:102`, `:136` and
+  `fleet.rs:72`; multimatrix `src/main.rs:869`; grorg-server `events.rs:252`;
+  gait-acp `trace_meta.rs:32`; gait `trace.rs:244` (the span is never entered,
+  so use `span.in_scope(|| context::add(..))`).
+- `http_server::IngressService`'s future is `ResponseFuture`, and the inner
+  service must return `http::Response<_>`. Its request carries a `ServerSpan`.
+- HTTP server span names change from the request path to the method (`GET`),
+  or `GET /route` once the service calls `ServerSpan::record_route`.
+- Baggage holds at most 24 entries (was 16); `tracestate` is capped at 512
+  characters (was 256) and shortened per W3C instead of dropped.
+- `concord-lint` has two new rules, `label-debug` and `reserved-label-prefix`.
+- `testing::capture_exclusive()` also clears the exported spans.
+- The `concord.` namespace is reserved for baggage keys (`concord.label.` is the
+  stamping prefix, `concord.label_conflicts` is the conflict report).
+
 ## Init
 
 ```rust
@@ -202,34 +222,37 @@ authorization or routing. At most 24 entries (`context::MAX_ENTRIES`), keys up
 to 64 bytes, values up to 256, and the header up to 8192 bytes of encoded text
 (W3C Baggage's limit). `tracestate` stays at 512: over that, entries longer
 than 128 characters go first, then whole entries from the end, and the header is
-never dropped whole. Over a cap, or malformed, an entry is dropped and the
+never dropped whole. Over a cap, in the reserved namespace, or malformed, an entry is dropped and the
 header's drops are recorded once as `concord.trace.baggage_dropped` with
 `dropped`; the request proceeds. Without an exporter every one of these is a
 no-op, `concord.trace.missing` never fires, and local output is unchanged.
 
 `link_from` carries span context only, as OpenTelemetry links do: it does not
 change the span's labels. A caller that wants a linked span's labels calls
-`context::add` for each.
+`context::add` for each (on an entered span: `span.in_scope(|| context::add(..))`).
+`parent_on` on a span that was already entered is refused: it cannot re-parent
+and it leaves the labels as they are.
 
-How labels become attributes. The layer stamps inherited labels, and `add`
-stamps its own, under `concord.label.<key>`, never the bare key. A processor
-wrapped around the exporting one, `LabelCollapse`, resolves each span when it
-ends: a repeated key (re-recorded fields, two `error!` calls) exports its last
-value once; a `concord.label.<k>` is renamed to `<k>`, unless the span has its
-own `<k>`, in which case the span's value wins and, when the exported strings
-differ, the key is listed in the span attribute `concord.label_conflicts` (keys
-only, never values). `init` and `testing` install the wrapper; a custom
-tracer provider must use
-`SdkTracerProvider::builder().with_span_processor(LabelCollapse(your_processor))`
-or every label stays under its `concord.label.` key and repeats are exported.
-The prefix `concord.label.` is reserved: `context::add` refuses it and an
-incoming baggage key with it is dropped and counted.
+How labels become attributes. Inside the crate the baggage layer stamps
+inherited labels, and `add` stamps its own, under `concord.label.<key>`; the
+layer is private, so a custom provider never sees those keys itself. A span
+processor, `LabelCollapse`, wrapped around the exporting one, resolves each
+span when it ends: a repeated key (re-recorded fields, two `error!` calls)
+exports its last value once, which the SDK does not do on its own; a
+`concord.label.<k>` is renamed to `<k>`, unless the span has its own `<k>`, in
+which case the span's value wins and, when the exported strings differ, the key
+is listed in the span attribute `concord.label_conflicts` (keys only, never
+values). `init` and `testing` install the wrapper. With your own tracer
+provider, build it with
+`SdkTracerProvider::builder().with_max_attributes_per_span(512).with_span_processor(LabelCollapse(your_processor))`
+or repeated keys are exported as repeats and labels stay under their
+`concord.label.` keys. The whole `concord.` namespace is reserved:
+`context::add` refuses a key in it and an incoming baggage key in it is dropped
+and counted.
 
 Limits. A span created but never entered gets no inherited labels. Labels land
 after the span starts, so samplers and `SpanProcessor::on_start` never see them
-(tracing-opentelemetry keeps its span data private). Stamped labels count
-against the SDK's 128 attributes per span, and the collapse cannot recover
-attributes the SDK has already dropped. Logs differ: an event's own field wins
+(tracing-opentelemetry keeps its span data private). Each changed label value is one stamped attribute until the span ends, so `init` raises the provider's `max_attributes_per_span` to 512; the collapse cannot recover attributes the SDK has already dropped. Logs differ: an event's own field wins
 over a label of the same name, silently. tracing-subscriber's fmt layer formats
 a user's `Debug` under its own lock, which a `Debug` impl that logs can
 deadlock on; nothing here changes that, and nothing here runs user `Debug`.
