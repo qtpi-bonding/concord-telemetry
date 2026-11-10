@@ -170,3 +170,18 @@ fn an_unchanged_value_is_not_stamped_again() {
         assert_eq!(stamp_count() - after_first, 1, "only the changed one");
     });
 }
+
+#[test]
+fn a_repeated_key_in_one_header_exports_its_last_value_once() {
+    let _c = capture_exclusive();
+    let span = info_span!("afb-repeat");
+    let sent = span.in_scope(|| {
+        context::add_from_baggage("a=1,a=2");
+        carrier::capture()
+    });
+    assert_eq!(sent.baggage.as_deref(), Some("a=2"));
+    drop(span);
+    let exported = one("afb-repeat");
+    assert_eq!(span_attr(&exported, "a").as_deref(), Some("2"));
+    assert_eq!(count_of(&exported, "a"), 1);
+}

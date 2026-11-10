@@ -168,6 +168,10 @@ pub mod context {
     /// `concord.trace.baggage_dropped`. An empty header, or a span that
     /// cannot hold baggage (no exporter), does nothing.
     ///
+    /// A key repeated within one header keeps its last value, positioned where
+    /// `parse` puts it. At the cap this can differ from calling `add` per
+    /// entry: `parse` has already applied the cap to the header.
+    ///
     /// This is an explicit add, so it works on a span that was already
     /// entered. A span that is not entered is not the current span: call it
     /// inside `span.in_scope(|| ..)`, as with `add`.
