@@ -299,6 +299,22 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
         self.ratchet_skip = old_ratchet;
     }
 
+    fn visit_trait_item_fn(&mut self, item: &'ast syn::TraitItemFn) {
+        let old = self.skip_registry;
+        let old_ratchet = self.ratchet_skip;
+        if self.visit_attrs(&item.attrs) {
+            self.skip_registry = true;
+            self.ratchet_skip = true;
+        }
+        // A method with no body is not instrumented.
+        if item.default.is_some() {
+            self.check_instrument(&item.attrs, &item.sig);
+        }
+        syn::visit::visit_trait_item_fn(self, item);
+        self.skip_registry = old;
+        self.ratchet_skip = old_ratchet;
+    }
+
     fn visit_item_impl(&mut self, item: &'ast ItemImpl) {
         let old = self.skip_registry;
         let old_ratchet = self.ratchet_skip;
@@ -757,7 +773,9 @@ fn records_by_value(ty: &syn::Type) -> bool {
     }
 }
 
-/// The names an `#[instrument]` parameter pattern binds, and whether each is
+/// The names an `#[instrument]` parameter pattern binds (tracing-attributes'
+/// `param_names`: identifiers, references, tuples, tuple structs and structs;
+/// slice patterns bind nothing it records), and whether each is
 /// recorded by value (a plain identifier of a value type) or through Debug.
 fn param_names(pat: &syn::Pat, by_value: bool, out: &mut Vec<(String, bool)>) {
     match pat {
@@ -769,7 +787,6 @@ fn param_names(pat: &syn::Pat, by_value: bool, out: &mut Vec<(String, bool)>) {
             .fields
             .iter()
             .for_each(|field| param_names(&field.pat, false, out)),
-        syn::Pat::Slice(slice) => slice.elems.iter().for_each(|p| param_names(p, false, out)),
         _ => {}
     }
 }

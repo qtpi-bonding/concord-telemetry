@@ -604,3 +604,49 @@ fn the_reserved_label_prefix_is_not_a_field_name() {
         FieldVerdict::ReservedPrefix
     );
 }
+
+#[test]
+fn instrument_parameter_patterns_follow_tracing_attributes() {
+    // Tuple patterns are recorded through Debug; slice patterns are not recorded at all.
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "#[instrument] fn f((request_id, other): (u8, u8)) {}"
+        ),
+        vec!["label-debug"]
+    );
+    assert!(scan(
+        "src/lib.rs",
+        "#[instrument] fn f([request_id, other]: [u8; 2]) {}"
+    )
+    .is_empty());
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "#[instrument] fn f(&(turn_id, _): &(u8, u8)) {}"
+        ),
+        vec!["label-debug"]
+    );
+}
+
+#[test]
+fn instrument_on_a_trait_default_method_is_checked() {
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "trait T { #[instrument] fn f(&self, request_id: Uuid) {} }"
+        ),
+        vec!["label-debug"]
+    );
+    // No body, no instrumentation.
+    assert!(scan(
+        "src/lib.rs",
+        "trait T { #[instrument] fn f(&self, request_id: Uuid); }"
+    )
+    .is_empty());
+    assert!(scan(
+        "src/lib.rs",
+        "trait T { #[test] #[instrument] fn f(&self, request_id: Uuid) {} }"
+    )
+    .is_empty());
+}
