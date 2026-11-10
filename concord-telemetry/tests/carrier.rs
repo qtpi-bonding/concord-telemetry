@@ -69,7 +69,7 @@ fn link_from_starts_a_new_trace_with_a_link() {
     carrier::link_from(&linked, &sent);
     let own = linked.in_scope(carrier::capture);
     assert_ne!(trace_id_of(&own), trace_id_of(&sent));
-    assert_eq!(own.baggage.as_deref(), Some("action_id=A2"));
+    assert_eq!(own.baggage, None, "a link carries span context only");
     drop(linked);
 
     let span = finished("a2-linked");

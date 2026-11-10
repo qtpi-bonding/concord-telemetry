@@ -100,17 +100,16 @@ pub fn parent_on(span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
 }
 
-/// Gives `span` a link to the carrier's span context, in a trace of its own,
-/// and takes the carrier's baggage.
+/// Gives `span` a link to the carrier's span context, in a trace of its own.
+/// A link carries span context only, as in OpenTelemetry: the span's labels
+/// are untouched. A caller that wants the linked span's labels calls
+/// `context::add` for each.
 pub fn link_from(span: &Span, c: &TraceCarrier) {
     let context = extract_context(getter(c));
     let span_context = context.span().span_context().clone();
     report_invalid(span, &getter(c), span_context.is_valid());
     if span_context.is_valid() {
         span.add_link(span_context);
-    }
-    if let Some(header) = &c.baggage {
-        baggage::ingest(span, header);
     }
 }
 
