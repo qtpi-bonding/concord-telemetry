@@ -128,3 +128,45 @@ async fn a_service_that_matched_a_route_names_the_span_after_it() {
         Some("201")
     );
 }
+
+#[test]
+fn dropping_the_response_future_drops_the_inner_future_inside_the_span() {
+    use std::future::Future;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll, Waker};
+    use tower::Service;
+
+    struct Probe(Arc<Mutex<Option<String>>>);
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            *self.0.lock().unwrap() = tracing::Span::current()
+                .metadata()
+                .map(|m| m.name().to_owned());
+        }
+    }
+
+    let _captured = capture_exclusive();
+    let seen = Arc::new(Mutex::new(None));
+    let probe_seen = Arc::clone(&seen);
+    let mut service = IngressLayer.layer(service_fn(move |_: Request| {
+        let probe = Probe(Arc::clone(&probe_seen));
+        async move {
+            let _probe = probe;
+            std::future::pending::<()>().await;
+            Ok::<_, Infallible>(http::Response::new(()))
+        }
+    }));
+    let request = http::Request::builder()
+        .uri("/x")
+        .body(())
+        .expect("request");
+    let mut future = Box::pin(service.call(request));
+    assert!(matches!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Pending
+    ));
+    drop(future);
+    assert_eq!(seen.lock().unwrap().as_deref(), Some("http.server"));
+}

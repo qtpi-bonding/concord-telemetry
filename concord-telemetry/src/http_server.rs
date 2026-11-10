@@ -65,11 +65,21 @@ impl<S> Layer<S> for IngressLayer {
 
 pin_project! {
     /// The inner service's future, run inside the `http.server` span, that
-    /// records the response's status when it is ready.
+    /// records the response's status when it is ready. Dropping it drops the
+    /// inner future inside the span, as `tracing`'s `Instrumented` does.
+    #[project = ResponseFutureProj]
     pub struct ResponseFuture<F> {
         #[pin]
-        inner: F,
+        inner: Option<F>,
         span: Span,
+    }
+
+    impl<F> PinnedDrop for ResponseFuture<F> {
+        fn drop(this: Pin<&mut Self>) {
+            let mut this = this.project();
+            let _entered = this.span.enter();
+            this.inner.set(None);
+        }
     }
 }
 
@@ -80,11 +90,14 @@ where
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let _entered = this.span.enter();
-        let poll = this.inner.poll(cx);
+        let ResponseFutureProj { inner, span } = self.project();
+        let _entered = span.enter();
+        let Some(future) = inner.as_pin_mut() else {
+            panic!("ResponseFuture polled after it was dropped");
+        };
+        let poll = future.poll(cx);
         if let Poll::Ready(Ok(response)) = &poll {
-            this.span.record(
+            span.record(
                 "http.response.status_code",
                 i64::from(response.status().as_u16()),
             );
@@ -132,7 +145,7 @@ where
         });
         let future = span.in_scope(|| self.inner.call(request));
         ResponseFuture {
-            inner: future,
+            inner: Some(future),
             span,
         }
     }
