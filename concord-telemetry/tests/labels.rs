@@ -380,3 +380,35 @@ fn parent_on_after_the_span_was_entered_changes_neither_trace_nor_labels() {
     assert_eq!(after.traceparent, before.traceparent);
     assert_eq!(after.baggage.as_deref(), Some("action_id=mine"));
 }
+
+#[test]
+fn parent_on_twice_before_the_first_enter_takes_the_second_trace_and_labels() {
+    let _c = capture_exclusive();
+    let first_origin = info_span!(parent: None, "twice-first");
+    let first = first_origin.in_scope(|| {
+        context::add("action_id", "first");
+        carrier::capture()
+    });
+    let second_origin = info_span!(parent: None, "twice-second");
+    let second = second_origin.in_scope(|| {
+        context::add("action_id", "second");
+        carrier::capture()
+    });
+    let span = info_span!(parent: None, "twice-target");
+    carrier::parent_on(&span, &first);
+    carrier::parent_on(&span, &second);
+    let taken = span.in_scope(carrier::capture);
+    assert_eq!(taken.baggage.as_deref(), Some("action_id=second"));
+    assert_eq!(
+        taken.traceparent.as_deref().map(|t| &t[3..35]),
+        second.traceparent.as_deref().map(|t| &t[3..35])
+    );
+    // Once entered, a third is refused for both.
+    carrier::parent_on(&span, &first);
+    let after = span.in_scope(carrier::capture);
+    assert_eq!(after.baggage.as_deref(), Some("action_id=second"));
+    assert_eq!(
+        after.traceparent.as_deref().map(|t| &t[3..35]),
+        second.traceparent.as_deref().map(|t| &t[3..35])
+    );
+}

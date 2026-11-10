@@ -3,9 +3,9 @@
 //! Baggage is labels only, never authorization or routing. The caps are
 //! [`MAX_ENTRIES`] (24) entries, `MAX_KEY` (64) bytes a key, `MAX_VALUE` (256)
 //! bytes a value and `MAX_HEADER` (8192) bytes for the whole header. An
-//! invalid entry is dropped and recorded once per header. The prefix
-//! `concord.label.` is reserved: `context::add` refuses it and an incoming
-//! header's entries with it are dropped.
+//! invalid entry is dropped and recorded once per header. The whole
+//! `concord.` namespace is reserved: `context::add` refuses it and an incoming
+//! header's entries in it are dropped.
 //!
 //! `BaggageLayer` copies a span's labels to its children by sharing one
 //! `Arc`. tracing-opentelemetry keeps its span data private, so the labels
@@ -24,9 +24,10 @@
 //!
 //! Limits: a span created but never entered gets no inherited labels, and
 //! labels land after the span starts, so samplers and `SpanProcessor::on_start`
-//! never see them (tracing-opentelemetry's `OtelData` is private). Stamped
-//! labels count against the SDK's 128 attributes per span, and the collapse
-//! cannot recover attributes the SDK has already dropped. Logs are different:
+//! never see them (tracing-opentelemetry's `OtelData` is private). Every changed
+//! label value is one stamped attribute until the span ends, so `init` raises
+//! the provider's limit to 512 attributes per span; the collapse cannot
+//! recover attributes the SDK has already dropped. Logs are different:
 //! `BaggageLogProcessor` keeps an event's own field over a label of the same
 //! name, without saying so.
 //!
@@ -130,6 +131,9 @@ pub(crate) struct BaggageMap {
     generation: u64,
     /// True once every label in `labels` has been stamped on the span.
     stamped: bool,
+    /// True once the span was entered. Distinct from `stamped`: `set` stamps
+    /// labels on a span that has not been entered yet.
+    entered: bool,
 }
 
 type Snapshot = (u64, Arc<Vec<Label>>);
@@ -179,6 +183,7 @@ where
                     labels: Arc::clone(&map.labels),
                     generation: 0,
                     stamped: false,
+                    entered: false,
                 })
         });
         if let Some(map) = inherited {
@@ -191,7 +196,7 @@ where
         {
             let extensions = span.extensions();
             match extensions.get::<BaggageMap>() {
-                Some(map) if !map.stamped && !map.labels.is_empty() => {}
+                Some(map) if !map.entered && !map.labels.is_empty() => {}
                 _ => return,
             }
         }
@@ -208,7 +213,12 @@ where
             let Some(map) = extensions.get_mut::<BaggageMap>() else {
                 return;
             };
+            if map.entered {
+                return;
+            }
+            map.entered = true;
             if map.stamped {
+                // `set` already stamped these labels.
                 return;
             }
             map.stamped = true;
@@ -278,14 +288,15 @@ pub(crate) fn set(span: &Span, new: Vec<(String, String)>) {
                 .collect(),
         );
         let mut extensions = s.extensions_mut();
-        let generation = extensions
+        let (previous, entered) = extensions
             .get_mut::<BaggageMap>()
-            .map_or(0, |map| map.generation)
-            + 1;
+            .map_or((0, false), |map| (map.generation, map.entered));
+        let generation = previous + 1;
         extensions.replace(BaggageMap {
             labels: Arc::clone(&labels),
             generation,
             stamped: true,
+            entered,
         });
         (generation, labels)
     });
@@ -315,6 +326,7 @@ pub(crate) fn add(span: &Span, key: &str, value: String) -> bool {
             });
         }
         let map = extensions.get_mut::<BaggageMap>()?;
+        map.entered = true;
         let fits = key.len() <= MAX_KEY
             && !key.is_empty()
             && !key.starts_with(RESERVED_NAMESPACE)
@@ -354,11 +366,13 @@ pub(crate) fn add(span: &Span, key: &str, value: String) -> bool {
 }
 
 /// True once `span` was entered with labels: its attributes are fixed by then.
+/// Before that, a second `parent_on` takes both the new `traceparent` and the
+/// new baggage.
 fn entered_with_labels(span: &Span) -> bool {
     with_extensions(span, |s| {
         s.extensions()
             .get::<BaggageMap>()
-            .is_some_and(|map| map.stamped && !map.labels.is_empty())
+            .is_some_and(|map| map.entered && !map.labels.is_empty())
     })
     .unwrap_or(false)
 }
