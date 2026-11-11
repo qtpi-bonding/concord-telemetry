@@ -16,6 +16,8 @@ pub enum FieldVerdict {
 pub struct Registry {
     pub names: BTreeMap<String, FieldDef>,
     pub never: BTreeSet<String>,
+    /// Wrapper macros declared field-bearing in the local registry.
+    pub log_macros: BTreeSet<String>,
 }
 
 impl Registry {
@@ -43,6 +45,7 @@ impl Registry {
         }
         self.names.extend(local.names);
         self.never.extend(local.never);
+        self.log_macros.extend(local.log_macros);
         Ok(self)
     }
 
@@ -68,6 +71,7 @@ fn from_parsed(parsed: concord_fields::Parsed) -> Registry {
     Registry {
         names: parsed.names,
         never: parsed.never,
+        log_macros: parsed.log_macros,
     }
 }
 

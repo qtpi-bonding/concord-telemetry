@@ -30,10 +30,21 @@ pub struct FieldDef {
 pub struct Parsed {
     pub names: BTreeMap<String, FieldDef>,
     pub never: BTreeSet<String>,
+    /// `[lint] log_macros`: a repo's own wrapper macros (bare names) that the
+    /// lint treats as field-bearing: first argument the error, the rest fields.
+    pub log_macros: BTreeSet<String>,
+}
+
+#[derive(Default, Deserialize)]
+struct Lint {
+    #[serde(default)]
+    log_macros: Vec<String>,
 }
 
 #[derive(Deserialize)]
 struct Document {
+    #[serde(default)]
+    lint: Lint,
     #[serde(default)]
     fields: BTreeMap<String, Definition>,
     #[serde(default)]
@@ -72,9 +83,24 @@ pub fn parse(source: &str) -> Result<Parsed, String> {
             },
         );
     }
+    let mut log_macros = BTreeSet::new();
+    for name in document.lint.log_macros {
+        let bare = !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !bare
+            || ["error", "error_anyhow", "error_at", "error_at_anyhow"].contains(&name.as_str())
+        {
+            return Err(format!(
+                "[lint] log_macros entry `{name}` must be a bare macro name other than the built-in error macros"
+            ));
+        }
+        log_macros.insert(name);
+    }
     Ok(Parsed {
         names,
         never: document.never.names.into_iter().collect(),
+        log_macros,
     })
 }
 

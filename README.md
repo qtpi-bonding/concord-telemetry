@@ -34,7 +34,7 @@ repo; `concord-telemetry` depends on it and re-exports the types.
   `concord_telemetry_proto::v1::Principal` (and, as before, `concord_telemetry::Principal`).
 - `emit_at` is public (`concord_telemetry::emit_at`; it was `__private::emit_at`),
   and `error_at!` / `error_at_anyhow!` are new public macros built on it.
-- `scripts/concord-lint-for-lock.sh` (new, see "Lint").
+- `scripts/concord-lint-for-lock.sh` (new, see "concord-lint"). `concord-lint` now checks `error_at!` / `error_at_anyhow!`, and a local registry can declare wrapper macros with `[lint] log_macros`.
 
 0.4.0 also carries 0.3.1's `context::add_from_baggage`.
 
@@ -353,9 +353,24 @@ The script reads the `concord-lint` package's git source from the lock and, if
 non-zero if the lock has no git-sourced `concord-lint`. Consumers find it in the
 checkout cargo made, as `check-otel-dependents.sh` is found, via `cargo metadata`.
 
-Custom wrapper macros are not seen: `record_error!(err, name = value)` is not
-field-bearing to the scanner, so its fields are not checked, even if it expands
-to `error!` (pinned by a test). `error_at!` is not recognised either.
+`error_at!` and `error_at_anyhow!` are checked like `error!`; their first four
+arguments (file, line, module, error) are skipped and the rest are fields.
+
+A repo's own wrapper macro, such as `record_error!(err, name = value)`, is not
+known to the scanner by default, so its fields are not checked. Declare it in the
+local registry (the file passed as `--local`, e.g. `fields.local.toml`):
+
+```toml
+[lint]
+log_macros = ["record_error"]
+```
+
+A declared macro (bare name, matched with or without a path such as
+`crate::record_error!`) is treated like `error!`: the first argument is the error,
+`source = ..` is skipped, every other `name = value` is checked against the
+registry. Built-in macro names and non-identifiers are rejected. Undeclared
+wrappers are ignored (pinned by tests). Run the lint with `--local` for any repo
+that declares wrappers.
 
 ## concord-lint ratchet rules
 

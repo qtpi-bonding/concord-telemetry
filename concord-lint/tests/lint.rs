@@ -121,25 +121,63 @@ fn tracing_messages_and_fields_are_checked() {
     assert_eq!(rules, vec!["unregistered-field"]);
 }
 
-/// The scanner knows `tracing::*!` and `concord_telemetry::error!` and
-/// `error_anyhow!` (and their imports and aliases) by name. A crate's own macro
-/// such as `record_error!(err, name = value)` is not field-bearing to it, even
-/// when it expands to `error!`: its fields are not checked against the registry.
-/// This pins that limit; a wrapper macro's fields are checked only where the
-/// wrapper's own body calls `error!` or `tracing::*!` with them.
+fn scan_with(registry: &Registry, source: &str) -> Vec<String> {
+    scan_file(Path::new("src/lib.rs"), source, registry)
+        .expect("source parses")
+        .into_iter()
+        .map(|violation| violation.rule)
+        .collect()
+}
+
 #[test]
-fn custom_log_macros_are_not_seen_as_field_bearing() {
-    let rules = scan(
-        "src/lib.rs",
-        "fn f() { record_error!(err, widget = 1); crate::record_error!(err, stdout = 2); }",
+fn error_at_and_error_at_anyhow_fields_are_checked_after_the_location_arguments() {
+    let source = "fn f() { concord_telemetry::error_at!(file!(), line!(), module_path!(), &e, widget = 1); \
+                  concord_telemetry::error_at_anyhow!(\"f\", 1, \"m\", &e, source = \"s\", stdout = 2); }";
+    assert_eq!(
+        scan("src/lib.rs", source),
+        vec!["unregistered-field", "never-log-field"]
     );
-    assert!(rules.is_empty(), "{rules:?}");
-    // The same fields in a macro it does know are caught.
-    let rules = scan(
-        "src/lib.rs",
-        "use tracing::info; fn f() { info!(widget = 1, \"x\"); }",
+    // Imported by name, registered fields and the location arguments are clean.
+    let clean = "use concord_telemetry::error_at; \
+                 fn f() { error_at!(file!(), line!(), module_path!(), &e, runtime_session_id = 1); }";
+    let local = Registry::shared()
+        .with_local("[fields]\nruntime_session_id = { meaning = \"s\" }")
+        .expect("local registry");
+    assert!(scan_with(&local, clean).is_empty());
+    assert_eq!(scan("src/lib.rs", clean), vec!["unregistered-field"]);
+}
+
+/// A wrapper macro is field-bearing only when the repo declares it in its local
+/// registry (`[lint] log_macros`); the first argument is the error, the rest are
+/// fields, as with `error!`.
+#[test]
+fn declared_wrapper_macros_are_checked_and_undeclared_ones_ignored() {
+    let source = "fn f() { record_error!(err, widget = 1); crate::record_error!(err, source = \"s\", stdout = 2); }";
+    assert!(scan("src/lib.rs", source).is_empty());
+    let declared = Registry::shared()
+        .with_local("[lint]\nlog_macros = [\"record_error\"]")
+        .expect("local registry");
+    assert_eq!(
+        scan_with(&declared, source),
+        vec!["unregistered-field", "never-log-field"]
     );
-    assert_eq!(rules, vec!["unregistered-field"]);
+    // Another macro stays ignored, and a registered field is clean.
+    assert!(scan_with(&declared, "fn f() { other!(err, widget = 1); }").is_empty());
+    let registered = declared
+        .with_local("[fields]\nwidget = { meaning = \"w\" }")
+        .expect("overlay");
+    assert!(scan_with(&registered, "fn f() { record_error!(err, widget = 1); }").is_empty());
+}
+
+#[test]
+fn bad_log_macro_declarations_are_errors() {
+    for bad in [
+        "[lint]\nlog_macros = [\"error\"]",
+        "[lint]\nlog_macros = [\"a::b\"]",
+        "[lint]\nlog_macros = [\"\"]",
+    ] {
+        assert!(Registry::shared().with_local(bad).is_err(), "{bad}");
+    }
 }
 
 #[test]

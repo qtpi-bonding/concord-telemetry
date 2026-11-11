@@ -85,12 +85,15 @@ impl<'a> Scanner<'a> {
         let name = path.segments.last()?.ident.to_string();
         let full = quote_path(path);
         let tracing_names = ["trace", "debug", "info", "warn", "error", "event"];
-        let concord_names = ["error", "error_anyhow"];
+        let concord_names = ["error", "error_anyhow", "error_at", "error_at_anyhow"];
         if (path.segments.len() == 1 && self.tracing.contains(&name)
             || path.segments.len() == 2 && full.starts_with("tracing::"))
             && (tracing_names.contains(&name.as_str()) || self.tracing.contains(&name))
         {
             return Some(("tracing".to_string(), name));
+        }
+        if self.registry.log_macros.contains(&name) {
+            return Some(("concord".to_string(), name));
         }
         if (path.segments.len() == 1 && self.concord.contains(&name)
             || path.segments.len() == 2 && full.starts_with("concord_telemetry::"))
@@ -165,7 +168,7 @@ fn collect_use_tree(
             {
                 tracing.push(alias);
             } else if prefix.first().map(String::as_str) == Some("concord_telemetry")
-                && ["error", "error_anyhow"].contains(&original)
+                && ["error", "error_anyhow", "error_at", "error_at_anyhow"].contains(&original)
             {
                 concord.push(alias);
             } else {
@@ -187,7 +190,7 @@ fn collect_use_tree(
 
 fn register_import(path: Vec<String>, tracing: &mut Vec<String>, concord: &mut Vec<String>) {
     let allowed_tracing = ["trace", "debug", "info", "warn", "error", "event"];
-    let allowed_concord = ["error", "error_anyhow"];
+    let allowed_concord = ["error", "error_anyhow", "error_at", "error_at_anyhow"];
     if path.first().map(String::as_str) == Some("tracing") {
         if path.last().map(String::as_str) == Some("*") {
             tracing.extend(allowed_tracing.iter().map(|name| (*name).to_string()));
@@ -443,8 +446,8 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
         if is_span_macro(&mac.path) {
             self.check_span_macro(mac);
         }
-        if let Some((family, _)) = self.macro_family(&mac.path) {
-            inspect_macro(self, mac, &family);
+        if let Some((family, name)) = self.macro_family(&mac.path) {
+            inspect_macro(self, mac, &family, &name);
         } else {
             recurse_unknown_macro(self, mac);
         }
@@ -473,11 +476,12 @@ impl Scanner<'_> {
     }
 }
 
-fn inspect_macro(scanner: &mut Scanner<'_>, mac: &Macro, family: &str) {
+fn inspect_macro(scanner: &mut Scanner<'_>, mac: &Macro, family: &str, name: &str) {
     let segments = split_top_level(&mac.tokens);
     let mut start = 0;
     if family == "concord" {
-        start = 1;
+        // The error; `error_at!` also takes file, line and module first.
+        start = if name.starts_with("error_at") { 4 } else { 1 };
     }
     let mut message = None;
     for (index, segment) in segments.iter().enumerate().skip(start) {
@@ -601,7 +605,7 @@ fn recurse_unknown_macro(scanner: &mut Scanner<'_>, mac: &Macro) {
     collect_nested_macros(mac.tokens.clone(), &mut nested);
     for nested_macro in &nested {
         match scanner.macro_family(&nested_macro.path) {
-            Some((family, _)) => inspect_macro(scanner, nested_macro, &family),
+            Some((family, name)) => inspect_macro(scanner, nested_macro, &family, &name),
             None => recurse_unknown_macro(scanner, nested_macro),
         }
     }
