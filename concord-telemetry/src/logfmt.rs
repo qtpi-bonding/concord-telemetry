@@ -262,6 +262,19 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
                 add("code.module.name", AnyValue::from(module.into_owned()));
             }
         }
+        for (key, value) in crate::location::extra() {
+            if !record.attributes_iter().any(|(own, _)| own.as_str() == key) {
+                record.add_attribute(
+                    key,
+                    match value {
+                        crate::AttrValue::Str(text) => AnyValue::from(text),
+                        crate::AttrValue::I64(number) => AnyValue::from(number),
+                        crate::AttrValue::F64(number) => AnyValue::from(number),
+                        crate::AttrValue::Bool(flag) => AnyValue::from(flag),
+                    },
+                );
+            }
+        }
         self.0.emit(record, instrumentation);
     }
 

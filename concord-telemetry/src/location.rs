@@ -26,7 +26,10 @@ pub(crate) struct Location {
 
 type Slot = RefCell<Option<Location>>;
 
+type Extra = RefCell<Vec<(&'static str, crate::AttrValue)>>;
+
 thread_local! {
+    static EXTRA: Extra = const { RefCell::new(Vec::new()) };
     static CALLER: Slot = const { RefCell::new(None) };
     static CURRENT: Slot = const { RefCell::new(None) };
 }
@@ -91,4 +94,23 @@ pub(crate) fn with_event_location(meta: &'static tracing::Metadata<'static>, bod
 /// The location of the record being emitted on this thread, if any.
 pub(crate) fn current() -> Option<Location> {
     CURRENT.with(|cell| cell.borrow().clone())
+}
+
+/// Runs `body` with runtime field pairs for the log processor to add to the
+/// record it produces on this thread.
+pub(crate) fn with_extra(fields: &[(&'static str, crate::AttrValue)], body: impl FnOnce()) {
+    struct Reset(Vec<(&'static str, crate::AttrValue)>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            let previous = std::mem::take(&mut self.0);
+            EXTRA.with(|cell| *cell.borrow_mut() = previous);
+        }
+    }
+    let _reset = Reset(EXTRA.with(|cell| cell.replace(fields.to_vec())));
+    body();
+}
+
+/// The runtime field pairs for the record being emitted on this thread.
+pub(crate) fn extra() -> Vec<(&'static str, crate::AttrValue)> {
+    EXTRA.with(|cell| cell.borrow().clone())
 }

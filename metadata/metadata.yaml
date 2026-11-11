@@ -83,12 +83,12 @@ facts:
   - concord-telemetry/tests/ui/bytes_field.rs
   - concord-telemetry/tests/ui/nested_message.rs
 - id: principal-proto-importable-from-build-rs
-  assertion: A consumer's build script can compile a .proto that imports concord_telemetry/v1/principal.proto by passing concord_telemetry_proto::proto_include_dir() as an include path and mapping .concord_telemetry.v1 to ::concord_telemetry::proto::v1 with extern_path; the in-repo proto-consumer-test crate shows the generated code uses the runtime crate's Principal type.
+  assertion: A consumer's build script can compile a .proto that imports concord_telemetry/v1/principal.proto by taking the include path from concord_telemetry_proto::proto_include_dir() and mapping .concord_telemetry.v1 to concord_telemetry_proto::RUST_EXTERN_PATH (::concord_telemetry_proto::v1) with extern_path. The crate and its proto-consumer-test live in the concord-telemetry-proto repo; concord-telemetry re-exports Principal, PrincipalKind, Verification and TraceCarrier from it, and the derive accepts a Principal field typed with either path.
   evidence:
-  - concord-telemetry-proto/src/lib.rs
-  - proto-consumer-test/build.rs
-  - proto-consumer-test/proto/consumer/v1/events.proto
-  - proto-consumer-test/src/lib.rs
+  - concord-telemetry/src/lib.rs
+  - concord-telemetry-derive/src/lib.rs
+  - concord-telemetry/tests/proto/fixtures.rs
+  - concord-telemetry/tests/ui_pass/proto_principal.rs
 - id: trace-context-inject-and-join
   assertion: propagation::inject writes traceparent (and tracestate only when non-empty) from the current span and writes nothing without a valid span context; set_parent and set_parent_from_env (which reads traceparent from TRACEPARENT and baggage from BAGGAGE, not tracestate) parent a span only on a valid traceparent; the gRPC client and server layers use this.
   evidence:

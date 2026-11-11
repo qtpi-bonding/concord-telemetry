@@ -169,6 +169,30 @@ macro_rules! error_anyhow {
     }};
 }
 
+/// Records `error` with an explicit code location and runtime field pairs, for
+/// a wrapper (an error hook) whose field names are only known at run time, which
+/// `tracing::event!` cannot take. The record is the one `error_at!` makes (the
+/// fingerprint source is `module`), and each pair is added as a record attribute
+/// of its own type: an `AttrValue::I64` stays an integer. A pair whose name the
+/// record already has is skipped. The names on the slice are not checked by
+/// `concord-lint`; the wrapper's own call sites are, once the wrapper is
+/// declared in `[lint] log_macros`.
+pub fn emit_error_at(
+    file: &'static str,
+    line: u32,
+    module: &'static str,
+    error: &dyn coded_error::CodedError,
+    fields: &[(&'static str, crate::AttrValue)],
+) {
+    let facts = coded_error::Facts::of(error);
+    let chain = chain_typed(error);
+    crate::emit_at(file, line, module, || {
+        crate::location::with_extra(fields, || {
+            crate::__emit_error!(facts, chain, module);
+        });
+    });
+}
+
 /// `error!` with an explicit code location: the record's `code.file.path`,
 /// `code.line.number` and `code.module.name` are `file`, `line` and `module`
 /// (a `&'static str`, a `u32` and a `&'static str`) instead of the macro's own

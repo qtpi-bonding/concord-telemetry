@@ -89,10 +89,22 @@ pub fn parse(source: &str) -> Result<Parsed, String> {
             && !name.starts_with(|c: char| c.is_ascii_digit())
             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
         if !bare
-            || ["error", "error_anyhow", "error_at", "error_at_anyhow"].contains(&name.as_str())
+            || [
+                "error",
+                "error_anyhow",
+                "error_at",
+                "error_at_anyhow",
+                "trace",
+                "debug",
+                "info",
+                "warn",
+                "event",
+                "span",
+            ]
+            .contains(&name.as_str())
         {
             return Err(format!(
-                "[lint] log_macros entry `{name}` must be a bare macro name other than the built-in error macros"
+                "[lint] log_macros entry `{name}` must be a bare macro name other than a built-in error or tracing macro"
             ));
         }
         log_macros.insert(name);

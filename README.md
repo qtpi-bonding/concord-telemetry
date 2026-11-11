@@ -27,13 +27,17 @@ repo; `concord-telemetry` depends on it and re-exports the types.
   `::concord_telemetry_proto::v1` (`concord_telemetry_proto::RUST_EXTERN_PATH`).
   Change `.extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")`
   to `.extern_path(".concord_telemetry.v1", concord_telemetry_proto::RUST_EXTERN_PATH)`.
-- The `From` conversions between the plain `TraceCarrier` and the prost one are gone:
-  they are the same type now (`concord_telemetry_proto::v1::field` converts
-  the root `TraceCarrier` to the wire one).
+- The plain `TraceCarrier` (`concord_telemetry_proto::TraceCarrier`, re-exported)
+  and the prost wire message (`concord_telemetry_proto::v1::TraceCarrier`) are
+  still two different types. The `From` impls between them and the `field`
+  helper moved to `concord-telemetry-proto` (`src/v1.rs`), so they are no longer
+  in `concord-telemetry`; the conversions work unchanged where both are in scope.
 - `#[derive(Event)]` accepts a `Principal` field typed
   `concord_telemetry_proto::v1::Principal` (and, as before, `concord_telemetry::Principal`).
 - `emit_at` is public (`concord_telemetry::emit_at`; it was `__private::emit_at`),
   and `error_at!` / `error_at_anyhow!` are new public macros built on it.
+  `emit_error_at(file, line, module, &err, &[(&'static str, AttrValue)])` records
+  an error with runtime field names (for a hook that only has them as data).
 - `scripts/concord-lint-for-lock.sh` (new, see "concord-lint"). `concord-lint` now checks `error_at!` / `error_at_anyhow!`, and a local registry can declare wrapper macros with `[lint] log_macros`.
 
 0.4.0 also carries 0.3.1's `context::add_from_baggage`.
@@ -115,6 +119,13 @@ module, || ..)` runs a closure with that location, and
 failing code's `file!()`, `line!()` and `module_path!()`. Without `source =` the
 fingerprint source is `module`. Field values are evaluated in a closure, so `.await`
 and `?` do not work in them.
+
+`concord_telemetry::emit_error_at(file, line, module, &err, &[(&'static str, AttrValue)])`
+is the same record with field names known only at run time (an error hook's
+`&[(name, value)]`, which `tracing::event!` cannot take). Each pair becomes a record
+attribute of its own type (an `AttrValue::I64` stays an integer). The slice's names
+are not checked by `concord-lint`; the wrapper's own call sites are, once the wrapper
+is declared in `[lint] log_macros`.
 
 ### Version
 
@@ -349,8 +360,10 @@ rev=$(scripts/concord-lint-for-lock.sh path/to/Cargo.lock)   # prints the rev
 The script reads the `concord-lint` package's git source from the lock and, if
 `~/.cache/concord-lint/<rev>/bin/concord-lint` is missing, runs `cargo install
 --locked --root ~/.cache/concord-lint/<rev> --git <url> --rev <rev> concord-lint`
-(through `$CARGO_SLOT`, else `cargo-slot` on PATH, else plain cargo). It exits
-non-zero if the lock has no git-sourced `concord-lint`. Consumers find it in the
+(through `$CARGO_SLOT`, else `cargo-slot` on PATH, else plain cargo; a nested
+cargo-slot call runs straight through, so no deadlock). A lock with no
+`concord-lint` package uses the `concord-telemetry` package's rev (same repo). It exits
+non-zero if neither is git-sourced, or if either is locked at more than one rev. Consumers find it in the
 checkout cargo made, as `check-otel-dependents.sh` is found, via `cargo metadata`.
 
 `error_at!` and `error_at_anyhow!` are checked like `error!`; their first four
@@ -368,7 +381,7 @@ log_macros = ["record_error"]
 A declared macro (bare name, matched with or without a path such as
 `crate::record_error!`) is treated like `error!`: the first argument is the error,
 `source = ..` is skipped, every other `name = value` is checked against the
-registry. Built-in macro names and non-identifiers are rejected. Undeclared
+registry. Built-in error macros, tracing macros (`trace`, `debug`, `info`, `warn`, `event`, `span`) and non-identifiers are rejected. Undeclared
 wrappers are ignored (pinned by tests). Run the lint with `--local` for any repo
 that declares wrappers.
 

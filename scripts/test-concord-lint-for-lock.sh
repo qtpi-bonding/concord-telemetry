@@ -56,4 +56,79 @@ grep -q "no git rev" "$work/err" || fail "missing explanation: $(cat "$work/err"
 printf 'version = 4\n\n[[package]]\nname = "serde"\nversion = "1.0.0"\n' > "$work/Cargo.lock"
 if "$script" "$work/Cargo.lock" 2>"$work/err"; then fail "lock without concord-lint must fail"; fi
 if "$script" "$work/missing.lock" 2>/dev/null; then fail "missing lock must fail"; fi
+# No concord-lint package: fall back to the concord-telemetry package (same repo and rev).
+tele() { cat > "$work/Cargo.lock" <<L
+version = 4
+
+[[package]]
+name = "concord-telemetry-derive"
+version = "0.1.0"
+source = "git+https://example.com/other.git#ffffffffffffffffffffffffffffffffffffffff"
+
+[[package]]
+name = "concord-telemetry"
+version = "0.4.0"
+$1
+L
+}
+REV2=89abcdef0123456789abcdef0123456789abcdef
+rm -rf "$HOME/.cache/concord-lint"; : > "$STUB_LOG"
+tele "source = \"git+https://github.com/qtpi-bonding/concord-telemetry.git?rev=$REV2#$REV2\""
+out="$("$script" "$work/Cargo.lock")"
+[ "$out" = "$REV2" ] || fail "fallback printed '$out'"
+grep -q -- "--git https://github.com/qtpi-bonding/concord-telemetry.git --rev $REV2 concord-lint" "$STUB_LOG" \
+  || fail "fallback install: $(cat "$STUB_LOG")"
+
+# concord-lint wins over concord-telemetry when both are there.
+cat > "$work/Cargo.lock" <<L
+version = 4
+
+[[package]]
+name = "concord-telemetry"
+version = "0.4.0"
+source = "git+https://github.com/qtpi-bonding/concord-telemetry.git#$REV2"
+
+[[package]]
+name = "concord-lint"
+version = "0.1.0"
+source = "git+https://github.com/qtpi-bonding/concord-telemetry.git#$REV"
+L
+[ "$("$script" "$work/Cargo.lock")" = "$REV" ] || fail "concord-lint should win"
+
+# Two revs of the same package: a clear failure, nothing installed.
+rm -rf "$HOME/.cache/concord-lint"; : > "$STUB_LOG"
+for pkg in concord-lint concord-telemetry; do
+  cat > "$work/Cargo.lock" <<L
+version = 4
+
+[[package]]
+name = "$pkg"
+version = "0.1.0"
+source = "git+https://github.com/qtpi-bonding/concord-telemetry.git#$REV"
+
+[[package]]
+name = "$pkg"
+version = "0.2.0"
+source = "git+https://github.com/qtpi-bonding/concord-telemetry.git#$REV2"
+L
+  if "$script" "$work/Cargo.lock" 2>"$work/err"; then fail "two $pkg revs must fail"; fi
+  grep -q "more than one" "$work/err" || fail "two $pkg revs: $(cat "$work/err")"
+  [ ! -s "$STUB_LOG" ] || fail "installed despite two revs"
+done
+
+# Two entries at the same rev are fine.
+cat > "$work/Cargo.lock" <<L
+version = 4
+
+[[package]]
+name = "concord-lint"
+version = "0.1.0"
+source = "git+https://github.com/qtpi-bonding/concord-telemetry.git#$REV"
+
+[[package]]
+name = "concord-lint"
+version = "0.1.0"
+source = "git+https://github.com/qtpi-bonding/concord-telemetry.git?rev=$REV#$REV"
+L
+[ "$("$script" "$work/Cargo.lock")" = "$REV" ] || fail "same rev twice should pass"
 echo "concord-lint-for-lock: ok"

@@ -173,6 +173,12 @@ fn declared_wrapper_macros_are_checked_and_undeclared_ones_ignored() {
 fn bad_log_macro_declarations_are_errors() {
     for bad in [
         "[lint]\nlog_macros = [\"error\"]",
+        "[lint]\nlog_macros = [\"info\"]",
+        "[lint]\nlog_macros = [\"warn\"]",
+        "[lint]\nlog_macros = [\"debug\"]",
+        "[lint]\nlog_macros = [\"trace\"]",
+        "[lint]\nlog_macros = [\"event\"]",
+        "[lint]\nlog_macros = [\"span\"]",
         "[lint]\nlog_macros = [\"a::b\"]",
         "[lint]\nlog_macros = [\"\"]",
     ] {

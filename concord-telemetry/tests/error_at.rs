@@ -68,3 +68,40 @@ fn error_at_anyhow_variant_exists() {
     concord_telemetry::error_at_anyhow!("a.rs", 7, "m", &err);
     assert_eq!(captured.attrs_for("error").len(), 1);
 }
+
+#[test]
+fn emit_error_at_carries_runtime_fields_with_their_types() {
+    let captured = concord_telemetry::testing::capture_exclusive();
+    let name: &'static str = "runtime_session_id";
+    let fields = [
+        (name, AttrValue::Str("rs-9".to_owned())),
+        ("attempt", AttrValue::I64(3)),
+        ("ratio", AttrValue::F64(0.5)),
+        ("retried", AttrValue::Bool(true)),
+    ];
+    concord_telemetry::emit_error_at(
+        "hook/src/lib.rs",
+        77,
+        "hook::errors",
+        &AtError::Failed,
+        &fields,
+    );
+    let errors = captured.attrs_for("error");
+    assert_eq!(errors.len(), 1);
+    let record = &errors[0];
+    assert_eq!(str_attr(record, "error.code"), Some("test.error_at.failed"));
+    assert_eq!(str_attr(record, "runtime_session_id"), Some("rs-9"));
+    assert_eq!(record.get("attempt"), Some(&AttrValue::I64(3)));
+    assert_eq!(record.get("ratio"), Some(&AttrValue::F64(0.5)));
+    assert_eq!(record.get("retried"), Some(&AttrValue::Bool(true)));
+    assert_eq!(str_attr(record, "code.file.path"), Some("hook/src/lib.rs"));
+    assert_eq!(record.get("code.line.number"), Some(&AttrValue::I64(77)));
+    assert_eq!(str_attr(record, "code.module.name"), Some("hook::errors"));
+    assert_eq!(str_attr(record, "error.source"), Some("hook::errors"));
+
+    // Runtime fields do not leak into the next record.
+    concord_telemetry::emit_error_at("a.rs", 1, "m", &AtError::Failed, &[]);
+    let errors = captured.attrs_for("error");
+    assert_eq!(errors.len(), 2);
+    assert!(!errors[1].contains_key("attempt"));
+}
