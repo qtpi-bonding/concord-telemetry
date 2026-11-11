@@ -20,6 +20,7 @@ turn_id = { meaning = "Id of one agent turn", label = true }
 request_id = { meaning = "Id of one request", label = true }
 header = { meaning = "Name of a carrier header that was dropped" }
 hop = { meaning = "Name of a boundary a trace crosses, as dotted words" }
+field = { meaning = "Name of a runtime field that was dropped from an error record" }
 dropped = { meaning = "Count of entries dropped from a carrier" }
 error_text = { meaning = "A CONCORD_ERROR_TEXT value that was not recognised" }
 instance_id = { meaning = "Instance id", label = true }

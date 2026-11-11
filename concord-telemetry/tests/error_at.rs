@@ -105,3 +105,60 @@ fn emit_error_at_carries_runtime_fields_with_their_types() {
     assert_eq!(errors.len(), 2);
     assert!(!errors[1].contains_key("attempt"));
 }
+
+#[test]
+fn an_explicit_pair_wins_over_a_label_of_the_same_name() {
+    let captured = concord_telemetry::testing::capture_exclusive();
+    let span = tracing::info_span!("label-vs-pair");
+    span.in_scope(|| {
+        concord_telemetry::context::add("request_id", "from-label");
+        concord_telemetry::emit_error_at(
+            "a.rs",
+            1,
+            "m",
+            &AtError::Failed,
+            &[("request_id", AttrValue::Str("from-pair".to_owned()))],
+        );
+    });
+    let errors = captured.attrs_for("error");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(str_attr(&errors[0], "request_id"), Some("from-pair"));
+}
+
+#[test]
+fn never_log_pair_names_are_dropped_and_the_drop_is_recorded() {
+    let captured = concord_telemetry::testing::capture_exclusive();
+    concord_telemetry::emit_error_at(
+        "a.rs",
+        1,
+        "m",
+        &AtError::Failed,
+        &[
+            ("stdout", AttrValue::Str("secret output".to_owned())),
+            ("token", AttrValue::Str("t".to_owned())),
+            ("attempt", AttrValue::I64(1)),
+        ],
+    );
+    let errors = captured.errors_where(|e| e.code == "test.error_at.failed");
+    assert_eq!(errors.len(), 1);
+    assert!(!errors[0].fields.contains_key("stdout"));
+    assert!(!errors[0].fields.contains_key("token"));
+    assert_eq!(errors[0].fields.get("attempt"), Some(&AttrValue::I64(1)));
+    let drops = captured.errors_where(|e| e.code == concord_telemetry::FIELD_DROPPED_CODE);
+    let mut names: Vec<_> = drops
+        .iter()
+        .map(|e| e.fields.get("field").cloned().expect("field"))
+        .collect();
+    names.sort_by_key(|v| format!("{v:?}"));
+    assert_eq!(
+        names,
+        vec![
+            AttrValue::Str("stdout".to_owned()),
+            AttrValue::Str("token".to_owned())
+        ]
+    );
+    // Values are never in the drop record.
+    assert!(drops
+        .iter()
+        .all(|e| !format!("{:?}", e.fields).contains("secret output")));
+}

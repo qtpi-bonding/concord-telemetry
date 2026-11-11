@@ -233,6 +233,20 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
         record: &mut SdkLogRecord,
         instrumentation: &opentelemetry::InstrumentationScope,
     ) {
+        // Runtime pairs from `emit_error_at` first: they win over a label.
+        for (key, value) in crate::location::extra() {
+            if !record.attributes_iter().any(|(own, _)| own.as_str() == key) {
+                record.add_attribute(
+                    key,
+                    match value {
+                        crate::AttrValue::Str(text) => AnyValue::from(text),
+                        crate::AttrValue::I64(number) => AnyValue::from(number),
+                        crate::AttrValue::F64(number) => AnyValue::from(number),
+                        crate::AttrValue::Bool(flag) => AnyValue::from(flag),
+                    },
+                );
+            }
+        }
         let baggage: Vec<_> = Context::map_current(|context| {
             context
                 .baggage()
@@ -260,19 +274,6 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
             }
             if let Some(module) = location.module {
                 add("code.module.name", AnyValue::from(module.into_owned()));
-            }
-        }
-        for (key, value) in crate::location::extra() {
-            if !record.attributes_iter().any(|(own, _)| own.as_str() == key) {
-                record.add_attribute(
-                    key,
-                    match value {
-                        crate::AttrValue::Str(text) => AnyValue::from(text),
-                        crate::AttrValue::I64(number) => AnyValue::from(number),
-                        crate::AttrValue::F64(number) => AnyValue::from(number),
-                        crate::AttrValue::Bool(flag) => AnyValue::from(flag),
-                    },
-                );
             }
         }
         self.0.emit(record, instrumentation);

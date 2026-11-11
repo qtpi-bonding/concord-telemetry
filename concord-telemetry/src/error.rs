@@ -184,10 +184,21 @@ pub fn emit_error_at(
     error: &dyn coded_error::CodedError,
     fields: &[(&'static str, crate::AttrValue)],
 ) {
+    static NEVER: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    let never = NEVER.get_or_init(|| concord_fields::shared().never);
+    let mut kept = Vec::with_capacity(fields.len());
+    for (name, value) in fields {
+        if never.contains(*name) {
+            crate::carrier::emit_field_dropped(name);
+        } else {
+            kept.push((*name, value.clone()));
+        }
+    }
     let facts = coded_error::Facts::of(error);
     let chain = chain_typed(error);
     crate::emit_at(file, line, module, || {
-        crate::location::with_extra(fields, || {
+        crate::location::with_extra(&kept, || {
             crate::__emit_error!(facts, chain, module);
         });
     });

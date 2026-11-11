@@ -27,6 +27,11 @@ pub const BAGGAGE_DROPPED_CODE: &str = "concord.trace.baggage_dropped";
 /// a `tracestate` is over its cap. The field `header` names which.
 pub const CARRIER_DROPPED_CODE: &str = "concord.trace.carrier_dropped";
 
+/// Code of the record emitted when `emit_error_at` drops a runtime field whose
+/// name is on the never-log list. The field `field` names it; its value is not
+/// recorded.
+pub const FIELD_DROPPED_CODE: &str = "concord.error.field_dropped";
+
 /// W3C Trace Context: a `tracestate` over this many characters is shortened.
 const TRACESTATE_MAX: usize = 512;
 /// When shortening, entries longer than this go first.
@@ -218,6 +223,16 @@ pub(crate) fn emit_baggage_dropped(count: usize) {
         ErrorClass::Logical,
         module_path!(),
         dropped = count as i64
+    );
+}
+
+pub(crate) fn emit_field_dropped(name: &str) {
+    emit_coded!(
+        tracing::Level::WARN,
+        FIELD_DROPPED_CODE,
+        ErrorClass::Logical,
+        module_path!(),
+        field = name
     );
 }
 

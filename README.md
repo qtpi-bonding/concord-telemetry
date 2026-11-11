@@ -125,7 +125,10 @@ is the same record with field names known only at run time (an error hook's
 `&[(name, value)]`, which `tracing::event!` cannot take). Each pair becomes a record
 attribute of its own type (an `AttrValue::I64` stays an integer). The slice's names
 are not checked by `concord-lint`; the wrapper's own call sites are, once the wrapper
-is declared in `[lint] log_macros`.
+is declared in `[lint] log_macros`. A pair wins over a label of the same name. A pair whose
+name is on the shared never-log list is dropped, and a `concord.error.field_dropped`
+record (`FIELD_DROPPED_CODE`, field `field`; the name, never the value) says so. The pairs go
+onto exported records only: the local fmt/JSON lines print the tracing event's own fields, so they do not show them.
 
 ### Version
 

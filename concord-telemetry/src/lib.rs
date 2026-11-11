@@ -23,7 +23,9 @@ pub mod grpc;
 #[cfg(feature = "testing")]
 pub mod testing;
 
-pub use carrier::{BAGGAGE_DROPPED_CODE, CARRIER_DROPPED_CODE, TRACE_MISSING_CODE};
+pub use carrier::{
+    BAGGAGE_DROPPED_CODE, CARRIER_DROPPED_CODE, FIELD_DROPPED_CODE, TRACE_MISSING_CODE,
+};
 pub use concord_telemetry_proto::TraceCarrier;
 
 pub use concord_telemetry_derive::Event;
