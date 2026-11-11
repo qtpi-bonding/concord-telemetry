@@ -39,8 +39,11 @@ lock "source = \"git+https://github.com/qtpi-bonding/concord-telemetry.git?rev=$
 out="$("$script" "$work/Cargo.lock")"
 [ "$out" = "$REV" ] || fail "printed '$out', want the concord-lint rev"
 [ -x "$HOME/.cache/concord-lint/$REV/bin/concord-lint" ] || fail "linter not installed under the rev"
-grep -q -- "cargo install --locked --root $HOME/.cache/concord-lint/$REV --git https://github.com/qtpi-bonding/concord-telemetry.git --rev $REV concord-lint" "$STUB_LOG" \
+# Built in a target dir and root of its own (never the shared target dir),
+# then moved under the rev.
+grep -Eq -- "^cargo install --locked --root [^ ]+/root --target-dir [^ ]+/target --git https://github.com/qtpi-bonding/concord-telemetry.git --rev $REV concord-lint$" "$STUB_LOG" \
   || fail "unexpected install command: $(cat "$STUB_LOG")"
+grep -q -- "--root $HOME/.cache/concord-lint/" "$STUB_LOG" && fail "installed straight into the cache root"
 
 # Second run: already installed, no second install, same output.
 out="$("$script" "$work/Cargo.lock")"

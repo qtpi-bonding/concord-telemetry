@@ -45,6 +45,17 @@ url="$(printf '%s\n' "$sources" | head -n1)"; url="${url#git+}"; url="${url%%#*}
 root="$HOME/.cache/concord-lint/$rev"
 if [ ! -x "$root/bin/concord-lint" ]; then
   SLOT="${CARGO_SLOT-$(command -v cargo-slot || true)}"
-  $SLOT cargo install --locked --root "$root" --git "$url" --rev "$rev" concord-lint >&2
+  # Build in a target dir of its own and install into a temporary root, then
+  # move it into place. A shared target dir (a global `target-dir` in
+  # ~/.cargo/config.toml) once handed back a stale concord-lint binary from an
+  # earlier rev (2026-11-10), and an interrupted install must never leave a
+  # bin/concord-lint that later runs trust.
+  work="$(mktemp -d)"
+  trap 'rm -rf "$work"' EXIT
+  $SLOT cargo install --locked --root "$work/root" --target-dir "$work/target" \
+    --git "$url" --rev "$rev" concord-lint >&2
+  mkdir -p "$(dirname "$root")"
+  rm -rf "$root"
+  mv "$work/root" "$root"
 fi
 echo "$rev"
