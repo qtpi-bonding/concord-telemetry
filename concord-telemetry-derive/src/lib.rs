@@ -117,7 +117,9 @@ fn is_principal(ty: &Type) -> bool {
     let Some(segments) = path_segments(ty) else {
         return false;
     };
-    segments.iter().any(|s| s == "concord_telemetry")
+    segments
+        .iter()
+        .any(|s| s == "concord_telemetry" || s == "concord_telemetry_proto")
         && segments.last().map(String::as_str) == Some("Principal")
 }
 /// The never-log names, from the one `fields.toml` parser.

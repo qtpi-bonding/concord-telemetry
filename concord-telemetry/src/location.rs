@@ -45,9 +45,10 @@ fn set(key: &'static std::thread::LocalKey<Slot>, location: Location) -> Restore
     Restore(key, key.with(|cell| cell.replace(Some(location))))
 }
 
-/// Runs `body` (an event's `emit`) with the macro call site as the location of
-/// the records it produces.
-#[doc(hidden)]
+/// Runs `body` with `file`, `line` and `module` as the code location of the
+/// records it produces, in place of the location tracing would report. `event!`
+/// and `error_at!` call it with their call site; a caller that records on behalf
+/// of someone else (an error hook in another crate) passes that code's location.
 pub fn emit_at(file: &'static str, line: u32, module: &'static str, body: impl FnOnce()) {
     let _restore = set(
         &CALLER,

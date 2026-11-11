@@ -34,7 +34,7 @@ pub trait Event: Sized {
 macro_rules! event {
     ($ev:expr) => {{
         let event = &$ev;
-        $crate::__private::emit_at(
+        $crate::emit_at(
             ::core::file!(),
             ::core::line!(),
             ::core::module_path!(),

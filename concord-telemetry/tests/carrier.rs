@@ -138,21 +138,6 @@ fn root_has_no_parent_and_takes_the_given_name() {
     assert_ne!(trace_id_of(&own), outer_id);
 }
 
-#[test]
-fn proto_carrier_converts_both_ways() {
-    use prost::Message;
-    let plain = TraceCarrier {
-        traceparent: Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".into()),
-        tracestate: None,
-        baggage: Some("a=b".into()),
-    };
-    let wire: concord_telemetry::proto::v1::TraceCarrier = (&plain).into();
-    let decoded =
-        concord_telemetry::proto::v1::TraceCarrier::decode(wire.encode_to_vec().as_slice())
-            .expect("decode");
-    assert_eq!(TraceCarrier::from(&decoded), plain);
-}
-
 fn dropped_headers(captured: &concord_telemetry::testing::Capture) -> Vec<AttrValue> {
     captured
         .errors_where(|e| e.code == CARRIER_DROPPED_CODE)

@@ -169,6 +169,62 @@ macro_rules! error_anyhow {
     }};
 }
 
+/// `error!` with an explicit code location: the record's `code.file.path`,
+/// `code.line.number` and `code.module.name` are `file`, `line` and `module`
+/// (a `&'static str`, a `u32` and a `&'static str`) instead of the macro's own
+/// call site, and `module` is the fingerprint source unless `source =` is given.
+/// For a crate that records on behalf of its callers, such as an error hook
+/// receiving the location from a macro in the code that failed:
+///
+/// ```ignore
+/// concord_telemetry::error_at!(file!(), line!(), module_path!(), &err, runtime_session_id = id);
+/// ```
+///
+/// Field values are evaluated inside a closure, so `.await` and `?` do not work
+/// in them.
+#[macro_export]
+macro_rules! error_at {
+    ($file:expr, $line:expr, $module:expr, $err:expr, source = $source:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::Facts::of(error);
+        let chain = $crate::__private::error::chain_typed(&*error);
+        $crate::emit_at($file, $line, $module, || {
+            $crate::__emit_error!(facts, chain, $source $(, $($fields)*)?)
+        })
+    }};
+    ($file:expr, $line:expr, $module:expr, $err:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::Facts::of(error);
+        let chain = $crate::__private::error::chain_typed(&*error);
+        let module: &'static str = $module;
+        $crate::emit_at($file, $line, module, || {
+            $crate::__emit_error!(facts, chain, module $(, $($fields)*)?)
+        })
+    }};
+}
+
+/// `error_at!` for an `anyhow::Error`, as `error_anyhow!` is to `error!`.
+#[macro_export]
+macro_rules! error_at_anyhow {
+    ($file:expr, $line:expr, $module:expr, $err:expr, source = $source:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::facts_anyhow(error);
+        let chain = $crate::__private::error::chain_anyhow(error);
+        $crate::emit_at($file, $line, $module, || {
+            $crate::__emit_error!(facts, chain, $source $(, $($fields)*)?)
+        })
+    }};
+    ($file:expr, $line:expr, $module:expr, $err:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::facts_anyhow(error);
+        let chain = $crate::__private::error::chain_anyhow(error);
+        let module: &'static str = $module;
+        $crate::emit_at($file, $line, module, || {
+            $crate::__emit_error!(facts, chain, module $(, $($fields)*)?)
+        })
+    }};
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __emit_error {

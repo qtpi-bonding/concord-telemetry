@@ -1,6 +1,6 @@
 [package]
 name = "concord-telemetry"
-version = "0.3.1"
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -16,7 +16,7 @@ channel = ["dep:tokio"]
 http-server = ["dep:http", "dep:tower", "dep:tower-layer", "dep:tower-service", "dep:pin-project-lite"]
 
 [dependencies]
-concord-telemetry-proto = { path = "../concord-telemetry-proto", version = "0.1.0" }
+concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telemetry-proto.git", rev = "4892badae333cfa7ebfdb4f17c76d65bb63612e4" }
 concord-telemetry-derive = { path = "../concord-telemetry-derive", version = "0.1.0" }
 coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "ffeaf3949230a8883b56c75e7031346a4f28ed4d", features = ["anyhow"] }
 anyhow = "1"

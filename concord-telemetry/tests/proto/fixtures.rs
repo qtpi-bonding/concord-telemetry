@@ -12,7 +12,7 @@ pub struct ActionStatusChanged {
     #[prost(enumeration = "Status", tag = "4")]
     pub new_status: i32,
     #[prost(message, optional, tag = "5")]
-    pub principal: Option<concord_telemetry::proto::v1::Principal>,
+    pub principal: Option<::concord_telemetry_proto::v1::Principal>,
     #[prost(message, optional, tag = "6")]
     pub at: Option<::prost_types::Timestamp>,
     #[prost(message, optional, tag = "7")]

@@ -42,39 +42,6 @@ pub(crate) fn otel_active() -> bool {
     OTEL_ACTIVE.load(Ordering::Relaxed)
 }
 
-pub mod v1 {
-    /// `concord_telemetry.v1.TraceCarrier`.
-    #[derive(Clone, PartialEq, ::prost::Message)]
-    pub struct TraceCarrier {
-        #[prost(string, optional, tag = "1")]
-        pub traceparent: ::core::option::Option<::prost::alloc::string::String>,
-        #[prost(string, optional, tag = "2")]
-        pub tracestate: ::core::option::Option<::prost::alloc::string::String>,
-        #[prost(string, optional, tag = "3")]
-        pub baggage: ::core::option::Option<::prost::alloc::string::String>,
-    }
-}
-
-impl From<&TraceCarrier> for v1::TraceCarrier {
-    fn from(c: &TraceCarrier) -> Self {
-        Self {
-            traceparent: c.traceparent.clone(),
-            tracestate: c.tracestate.clone(),
-            baggage: c.baggage.clone(),
-        }
-    }
-}
-
-impl From<&v1::TraceCarrier> for TraceCarrier {
-    fn from(c: &v1::TraceCarrier) -> Self {
-        Self {
-            traceparent: c.traceparent.clone(),
-            tracestate: c.tracestate.clone(),
-            baggage: c.baggage.clone(),
-        }
-    }
-}
-
 /// The current span's trace context and baggage.
 pub fn capture() -> TraceCarrier {
     let mut carrier = TraceCarrier::default();

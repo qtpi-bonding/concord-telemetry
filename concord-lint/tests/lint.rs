@@ -121,6 +121,27 @@ fn tracing_messages_and_fields_are_checked() {
     assert_eq!(rules, vec!["unregistered-field"]);
 }
 
+/// The scanner knows `tracing::*!` and `concord_telemetry::error!` and
+/// `error_anyhow!` (and their imports and aliases) by name. A crate's own macro
+/// such as `record_error!(err, name = value)` is not field-bearing to it, even
+/// when it expands to `error!`: its fields are not checked against the registry.
+/// This pins that limit; a wrapper macro's fields are checked only where the
+/// wrapper's own body calls `error!` or `tracing::*!` with them.
+#[test]
+fn custom_log_macros_are_not_seen_as_field_bearing() {
+    let rules = scan(
+        "src/lib.rs",
+        "fn f() { record_error!(err, widget = 1); crate::record_error!(err, stdout = 2); }",
+    );
+    assert!(rules.is_empty(), "{rules:?}");
+    // The same fields in a macro it does know are caught.
+    let rules = scan(
+        "src/lib.rs",
+        "use tracing::info; fn f() { info!(widget = 1, \"x\"); }",
+    );
+    assert_eq!(rules, vec!["unregistered-field"]);
+}
+
 #[test]
 fn test_module_skips_only_the_registry_rule() {
     let source = fs::read_to_string(fixture("test_module.rs")).expect("fixture exists");

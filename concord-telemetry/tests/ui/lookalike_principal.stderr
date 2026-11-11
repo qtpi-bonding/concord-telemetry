@@ -1,0 +1,6 @@
+error: field `principal` is a nested message; only Principal, Timestamp, and Duration are supported
+  --> tests/ui/lookalike_principal.rs:18:5
+   |
+18 | /     #[prost(message, optional, tag = "2")]
+19 | |     principal: Option<concord_telemetry_proto_fake::v1::Principal>,
+   | |__________________________________________________________________^

@@ -10,10 +10,33 @@ do. Consumers depend on `concord-telemetry` and `tracing`, never on an
 Workspace: `concord-telemetry` (library), `concord-telemetry-derive`
 (`#[derive(Event)]`, re-exported), `concord-lint` (checker binary),
 `concord-fields` (the one parser of `fields.toml`, used by the derive and the lint). The shared
-field registry is `fields.toml`; `concord-telemetry-proto/proto/concord_telemetry/v1/principal.proto`
-is the `Principal` message (hand-written prost types in `concord-telemetry`; the
-tiny `concord-telemetry-proto` crate exposes the proto's include path to
-consumers' `build.rs`, see "Importing `principal.proto`" below).
+field registry is `fields.toml`. The proto types (`Principal`, `PrincipalKind`,
+`Verification`, the wire `TraceCarrier`), `principal.proto`, `trace_carrier.proto`
+and the build-script helpers live in the separate
+[`concord-telemetry-proto`](https://github.com/qtpi-bonding/concord-telemetry-proto)
+repo; `concord-telemetry` depends on it and re-exports the types.
+
+## Breaking changes in 0.4.0
+
+- The proto types moved to `concord-telemetry-proto` (its own repo). The crate
+  `concord-telemetry-proto` is no longer in this workspace, so a `[build-dependencies]`
+  entry for it points at the new repo, not this one.
+- `concord_telemetry::proto::v1` is removed. There is one path per type:
+  `concord_telemetry::{Principal, PrincipalKind, Verification, TraceCarrier}` are
+  re-exports of `concord_telemetry_proto`'s, and the generated-code path is
+  `::concord_telemetry_proto::v1` (`concord_telemetry_proto::RUST_EXTERN_PATH`).
+  Change `.extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")`
+  to `.extern_path(".concord_telemetry.v1", concord_telemetry_proto::RUST_EXTERN_PATH)`.
+- The `From` conversions between the plain `TraceCarrier` and the prost one are gone:
+  they are the same type now (`concord_telemetry_proto::v1::field` converts
+  the root `TraceCarrier` to the wire one).
+- `#[derive(Event)]` accepts a `Principal` field typed
+  `concord_telemetry_proto::v1::Principal` (and, as before, `concord_telemetry::Principal`).
+- `emit_at` is public (`concord_telemetry::emit_at`; it was `__private::emit_at`),
+  and `error_at!` / `error_at_anyhow!` are new public macros built on it.
+- `scripts/concord-lint-for-lock.sh` (new, see "Lint").
+
+0.4.0 also carries 0.3.1's `context::add_from_baggage`.
 
 ## 0.3.1
 
@@ -85,6 +108,14 @@ Log records also carry `code.file.path`, `code.line.number` and
 `error_anyhow!` they are the macro call site; for `event!` too (not the event
 type's definition). An event field of the same name wins.
 
+For a record made on behalf of other code, `concord_telemetry::emit_at(file, line,
+module, || ..)` runs a closure with that location, and
+`error_at!(file, line, module, &err, source = .., fields..)` (and
+`error_at_anyhow!`) is `error!` with it: an error hook in another crate passes the
+failing code's `file!()`, `line!()` and `module_path!()`. Without `source =` the
+fingerprint source is `module`. Field values are evaluated in a closure, so `.await`
+and `?` do not work in them.
+
 ### Version
 
 Pass `concord_telemetry::version!()` as `Config`'s `service_version`. It expands
@@ -126,22 +157,25 @@ which also reaches enums and oneofs):
 ```rust
 .message_attribute(".grorg.events", "#[derive(::concord_telemetry::Event)]")
 .message_attribute(".grorg.events", "#[concord_event(package = \"grorg.events.v1\")]")
-.extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")
+.extern_path(".concord_telemetry.v1", concord_telemetry_proto::RUST_EXTERN_PATH)
 ```
 
 ### Importing `principal.proto` from your build
 
 An event proto with a `Principal` field imports
 `concord_telemetry/v1/principal.proto`. Build scripts get its include path from
-`concord-telemetry-proto`, which has no dependencies (never put `concord-telemetry`
-itself in `[build-dependencies]`: that compiles the OpenTelemetry stack into
-your build-script graph):
+the `concord-telemetry-proto` crate (its own repo), which has no dependency on
+the OpenTelemetry stack (never put `concord-telemetry` itself in
+`[build-dependencies]`: that compiles it into your build-script graph). Generated
+code names `::concord_telemetry_proto::v1::*`, so the crate is a normal dependency
+too:
 
 ```toml
 [dependencies]
 concord-telemetry = { git = "https://github.com/qtpi-bonding/concord-telemetry.git", rev = "<revision>" }
+concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telemetry-proto.git", rev = "<revision>" }
 [build-dependencies]
-concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telemetry.git", rev = "<revision>" }
+concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telemetry-proto.git", rev = "<revision>" }
 ```
 
 ```rust
@@ -150,16 +184,16 @@ let includes = [PathBuf::from("proto"), concord_telemetry_proto::proto_include_d
 let descriptor = PathBuf::from(std::env::var("OUT_DIR")?).join("descriptor.bin");
 prost_build::Config::new()   // or tonic_build::configure()
     .file_descriptor_set_path(&descriptor)
-    .extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")
+    .extern_path(".concord_telemetry.v1", concord_telemetry_proto::RUST_EXTERN_PATH)
     .compile_protos(&["proto/yours/v1/events.proto"], &includes)?;
 pbjson_build::Builder::new()
     .register_descriptors(&std::fs::read(&descriptor)?)?
-    .extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")
+    .extern_path(".concord_telemetry.v1", concord_telemetry_proto::RUST_EXTERN_PATH)
     .build(&[".yours.v1"])?;
 ```
 
 Both `extern_path` calls are needed: prost for the message, pbjson for serde.
-`proto-consumer-test/` is a working copy of this build, run by `scripts/check.sh`.
+The proto repo carries a working copy of this build (`proto-consumer-test/`).
 
 The derive needs `as_str_name`/`from_str_name` on enums, which prost-build
 emits. Rules: scalars, strings, enums (by name), `Timestamp`/`Duration`
@@ -211,8 +245,8 @@ trace id and the sampled flag of its own requests.
 ### Carriers and baggage
 
 `concord_telemetry::carrier` moves a trace across a boundary as a
-`TraceCarrier` (the three header values; `proto::v1::TraceCarrier` is its
-protobuf form): `capture()` takes the current span's, `parent_on` joins it,
+`TraceCarrier` (the three header values; `concord_telemetry_proto::v1::TraceCarrier`
+is its protobuf form, `concord_telemetry_proto::v1::field` the conversion): `capture()` takes the current span's, `parent_on` joins it,
 `link_from` starts a new trace linked to it, and `root(name)` starts one with
 no parent. `extract_required(hop, ..)` is `parent_on` for a hop that must
 carry a trace: with an exporter and no valid `traceparent` it records
@@ -289,7 +323,7 @@ confirmed against grorg (tonic server tests) and structmux (daemon tests).
 
 ## concord-lint
 
-Install at the rev you pin: `cargo install --git https://github.com/qtpi-bonding/concord-telemetry --rev <rev> concord-lint`.
+Install at the rev you pin (or use `scripts/concord-lint-for-lock.sh`, below): `cargo install --git https://github.com/qtpi-bonding/concord-telemetry --rev <rev> concord-lint`.
 `concord-lint [--local fields.local.toml] [--baseline lint-baseline.txt [--write-baseline]] <paths...>`
 checks tracing event macros (messages are fixed strings, no interpolation or
 arguments), field names against `fields.toml` plus your local overlay, never-log
@@ -304,6 +338,24 @@ type tracing-attributes records through Debug and that is not skipped or shadowe
 (`reserved-label-prefix`). Known limits: other span-macro and `#[instrument]` fields are not checked against the registry;
 `process::exit` in modules of a binary (`mod cli;`) and a bare `exit(1)` after
 `use std::process::exit` are not detected.
+
+To lint at the rev a repo's `Cargo.lock` pins (the `concord-lint` package, git source):
+
+```sh
+rev=$(scripts/concord-lint-for-lock.sh path/to/Cargo.lock)   # prints the rev
+~/.cache/concord-lint/$rev/bin/concord-lint --baseline lint-baseline.txt src
+```
+
+The script reads the `concord-lint` package's git source from the lock and, if
+`~/.cache/concord-lint/<rev>/bin/concord-lint` is missing, runs `cargo install
+--locked --root ~/.cache/concord-lint/<rev> --git <url> --rev <rev> concord-lint`
+(through `$CARGO_SLOT`, else `cargo-slot` on PATH, else plain cargo). It exits
+non-zero if the lock has no git-sourced `concord-lint`. Consumers find it in the
+checkout cargo made, as `check-otel-dependents.sh` is found, via `cargo metadata`.
+
+Custom wrapper macros are not seen: `record_error!(err, name = value)` is not
+field-bearing to the scanner, so its fields are not checked, even if it expands
+to `error!` (pinned by a test). `error_at!` is not recognised either.
 
 ## concord-lint ratchet rules
 
@@ -321,7 +373,7 @@ the crates you name (normally `concord-telemetry`) depends directly on
 `-p` it checks the whole workspace. It runs cargo through `$CARGO_SLOT` when set.
 Copy it or call it from a pinned checkout; do not rewrite it in your check script.
 
-`scripts/check.sh` (through the compile slots): fmt, clippy, tests, the
+`scripts/check.sh` (through the compile slots): fmt, clippy, tests, the lock-script test, the
 no-default-features build, the opentelemetry dependents allowlist (`scripts/check-otel-dependents.sh`), no tonic, no
 rustls in the default tree, and the lint on this repo. `collector/otel-collector.yaml`
 is an example collector config for the end-to-end stack.
