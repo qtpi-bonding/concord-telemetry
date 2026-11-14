@@ -154,7 +154,7 @@ time; empty values there are ignored.
 
 The optional `channel` feature provides `channel::traced` and
 `channel::spawn_traced`, which carry the current tracing span (including its
-baggage) across Tokio channels and spawned tasks. The optional `http-server`
+baggage) across Tokio channels and spawned tasks. `TracedSender` also has `try_send`, `reserve` (a `TracedPermit` whose `send` records the span current at that call), `closed` and `is_closed`; `TracedReceiver` has `poll_recv` and `close` (0.4.1). The optional `http-server`
 feature provides `http_server::IngressLayer` for joining W3C HTTP ingress
 headers in an `http.server` span.
 

@@ -42,36 +42,54 @@ impl<T> TracedSender<T> {
             .map_err(|SendError((value, _))| SendError(value))
     }
 
-    /// Not implemented yet (red-test stub).
-    pub fn try_send(&self, _v: T) -> Result<(), TrySendError<T>> {
-        unimplemented!("try_send")
+    /// Attempts to send `v` without waiting, recording the span current at the call site.
+    ///
+    /// Returns `TrySendError::Full` if the channel is at capacity and
+    /// `TrySendError::Closed` if the receiver has been dropped or closed.
+    /// The returned error carries the original value, not the span.
+    pub fn try_send(&self, v: T) -> Result<(), TrySendError<T>> {
+        let span = Span::current();
+        self.inner.try_send((v, span)).map_err(|err| match err {
+            TrySendError::Full((value, _)) => TrySendError::Full(value),
+            TrySendError::Closed((value, _)) => TrySendError::Closed(value),
+        })
     }
 
-    /// Not implemented yet (red-test stub).
+    /// Waits for a slot in the channel and reserves it as a [`TracedPermit`].
+    ///
+    /// The span is recorded when the permit's `send` is called, not here.
+    /// Dropping the permit without sending releases the reserved slot.
+    /// This method is cancel-safe.
     pub async fn reserve(&self) -> Result<TracedPermit<'_, T>, SendError<()>> {
-        unimplemented!("reserve")
+        self.inner
+            .reserve()
+            .await
+            .map(|permit| TracedPermit { inner: permit })
     }
 
-    /// Not implemented yet (red-test stub).
+    /// Completes when the receiver has been dropped or closed.
     pub async fn closed(&self) {
-        unimplemented!("closed")
+        self.inner.closed().await
     }
 
-    /// Not implemented yet (red-test stub).
+    /// Returns `true` if the receiver has been dropped or closed.
     pub fn is_closed(&self) -> bool {
-        unimplemented!("is_closed")
+        self.inner.is_closed()
     }
 }
 
-/// Not implemented yet (red-test stub).
+/// A reserved slot in a [`TracedSender`] channel.
+///
+/// Dropping the permit without calling [`TracedPermit::send`] frees the slot.
 pub struct TracedPermit<'a, T> {
-    _inner: std::marker::PhantomData<&'a T>,
+    inner: mpsc::Permit<'a, (T, Span)>,
 }
 
 impl<T> TracedPermit<'_, T> {
-    /// Not implemented yet (red-test stub).
-    pub fn send(self, _v: T) {
-        unimplemented!("permit send")
+    /// Sends `v` through the reserved slot, recording the span current at the call to `send`.
+    pub fn send(self, v: T) {
+        let span = Span::current();
+        self.inner.send((v, span));
     }
 }
 
@@ -81,14 +99,15 @@ impl<T> TracedReceiver<T> {
         self.inner.recv().await
     }
 
-    /// Not implemented yet (red-test stub).
-    pub fn poll_recv(&mut self, _cx: &mut Context<'_>) -> Poll<Option<(T, Span)>> {
-        unimplemented!("poll_recv")
+    /// Polls for the next value and its sending span, registering the task waker if none is ready.
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<(T, Span)>> {
+        self.inner.poll_recv(cx)
     }
 
-    /// Not implemented yet (red-test stub).
+    /// Closes the receiving half, preventing new messages from being sent while
+    /// still allowing buffered messages to be received.
     pub fn close(&mut self) {
-        unimplemented!("close")
+        self.inner.close()
     }
 }
 

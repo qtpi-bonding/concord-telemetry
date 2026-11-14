@@ -99,8 +99,9 @@ async fn try_send_to_a_dropped_receiver_gives_back_the_callers_value() {
 async fn a_permit_sends_with_the_span_current_when_send_is_called_not_when_reserved() {
     let _captured = capture_exclusive();
     let (sender, mut receiver) = traced(1);
-    let permit = tagged_span("reserve", "AT_RESERVE")
-        .in_scope(|| sender.reserve())
+    let permit = sender
+        .reserve()
+        .instrument(tagged_span("reserve", "AT_RESERVE"))
         .await
         .expect("permit");
     tagged_span("send", "AT_SEND").in_scope(|| permit.send(9u8));
@@ -115,7 +116,7 @@ async fn reserve_waits_while_full_and_completes_when_the_receiver_takes_one() {
     sender.send(1u8).await.expect("send");
     let mut reserving = Box::pin(sender.reserve());
     assert!(
-        futures_poll_once(reserving.as_mut()).is_pending(),
+        poll_once(reserving.as_mut()).is_pending(),
         "full buffer: reserve waits"
     );
     assert_eq!(receiver.recv().await.expect("one").0, 1u8);
@@ -130,7 +131,7 @@ async fn a_reserve_dropped_while_pending_loses_nothing_and_a_new_reserve_works()
     sender.send(1u8).await.expect("send");
     {
         let mut reserving = Box::pin(sender.reserve());
-        assert!(futures_poll_once(reserving.as_mut()).is_pending());
+        assert!(poll_once(reserving.as_mut()).is_pending());
     } // dropped while pending, as a select! branch is
     assert_eq!(receiver.recv().await.expect("kept").0, 1u8);
     let permit = sender.reserve().await.expect("fresh reserve");
@@ -197,7 +198,7 @@ async fn close_stops_new_sends_but_keeps_queued_values() {
     assert!(receiver.recv().await.is_none());
 }
 
-fn futures_poll_once<F: Future>(mut f: std::pin::Pin<&mut F>) -> Poll<F::Output> {
+fn poll_once<F: Future>(mut f: std::pin::Pin<&mut F>) -> Poll<F::Output> {
     let waker = std::task::Waker::noop();
     let mut cx = std::task::Context::from_waker(waker);
     f.as_mut().poll(&mut cx)
