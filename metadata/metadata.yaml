@@ -14,12 +14,6 @@ public:
   links:
   - type: repo
     url: https://github.com/qtpi-bonding/concord-telemetry
-private:
-  started: 2026-10
-  visibility: private
-  license: none
-  ownership: designed and directed; code written with AI assistance
-  build: agentic
 facts:
 - id: otlp-export-opt-in-by-env-endpoint
   assertion: The crate builds OTLP log and trace exporters (HTTP, binary protobuf) only when OTEL_EXPORTER_OTLP_ENDPOINT is set; when it is unset, no exporter or tracer provider is created and nothing is sent.
