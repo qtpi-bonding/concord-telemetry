@@ -202,6 +202,7 @@ pub fn assert_no_label_conflict(spans: &[SpanData]) {
 /// How many label attributes the baggage layer has written so far, for tests
 /// of the layer's work. The end-of-span collapse hides repeated writes, so
 /// an exported span cannot show them.
+#[doc(hidden)]
 pub fn stamp_count() -> usize {
     crate::baggage::STAMPS.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -209,6 +210,7 @@ pub fn stamp_count() -> usize {
 /// Installs a hook that the baggage layer calls on a span's first entry,
 /// after it decided to stamp and before it stamps; `None` removes it. For
 /// tests that park a thread there.
+#[doc(hidden)]
 pub fn set_enter_hook(hook: Option<Box<dyn Fn() + Send + Sync>>) {
     *crate::baggage::ENTER_HOOK
         .lock()
@@ -217,6 +219,7 @@ pub fn set_enter_hook(hook: Option<Box<dyn Fn() + Send + Sync>>) {
 
 /// Sets whether an exporter counts as configured, which `extract_required`
 /// checks before it records `concord.trace.missing`. `capture()` leaves it off.
+#[doc(hidden)]
 pub fn set_otel_active(active: bool) {
     crate::carrier::set_otel_active(active);
 }
