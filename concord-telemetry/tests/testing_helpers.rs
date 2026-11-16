@@ -99,7 +99,18 @@ fn label_names_match_registry() {
 /// Sets a pre-existing traceparent once, before any test takes the lock, so
 /// restoration of a present value (traceparent) and of an absent one
 /// (baggage, removed here) are both observable.
-fn init_env() {
+/// The three env tests read the variables outside `trace_env`'s own lock, so
+/// they run one at a time; the guard this returns is held for the whole test.
+fn init_env() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let serial = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    init_env_once();
+    serial
+}
+
+fn init_env_once() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         std::env::set_var(TRACEPARENT_ENV, "tp-prev");
@@ -109,7 +120,7 @@ fn init_env() {
 
 #[test]
 fn trace_env_sets_and_restores() {
-    init_env();
+    let _serial = init_env();
     {
         let _g = testing::trace_env(Some("tp-1"), Some("k=v"));
         assert_eq!(std::env::var(TRACEPARENT_ENV).as_deref(), Ok("tp-1"));
@@ -132,7 +143,7 @@ fn trace_env_sets_and_restores() {
 
 #[test]
 fn trace_env_restores_on_panic() {
-    init_env();
+    let _serial = init_env();
     let result = std::panic::catch_unwind(|| {
         testing::with_trace_env(Some("tp-panic"), Some("x=y"), || {
             assert_eq!(std::env::var(TRACEPARENT_ENV).as_deref(), Ok("tp-panic"));
@@ -149,7 +160,7 @@ fn trace_env_restores_on_panic() {
 
 #[test]
 fn trace_env_serialises() {
-    init_env();
+    let _serial = init_env();
     let guard = testing::trace_env(Some("tp-holder"), None);
     let got_it = Arc::new(AtomicBool::new(false));
     let (tx, rx) = mpsc::channel();
