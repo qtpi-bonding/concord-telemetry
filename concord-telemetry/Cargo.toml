@@ -21,7 +21,7 @@ concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telem
 concord-telemetry-derive = { path = "../concord-telemetry-derive", version = "0.1.0" }
 coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "ffeaf3949230a8883b56c75e7031346a4f28ed4d", features = ["anyhow"] }
 anyhow = "1"
-concord-fields = { path = "../concord-fields", version = "0.1.0" }
+concord-fields = { path = "../concord-fields", version = "0.2.0" }
 opentelemetry = { version = "=0.33.1", default-features = false, features = ["logs", "trace"], optional = true }
 opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["logs", "trace"], optional = true }
 opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["http-proto", "logs", "trace"], optional = true }

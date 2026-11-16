@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use concord_lint::registry::{FieldVerdict, Registry};
+use concord_fields::{FieldVerdict, Registry};
 use concord_lint::scan::scan_file;
 
 fn scan(name: &str, source: &str) -> Vec<String> {
@@ -141,7 +141,7 @@ fn error_at_and_error_at_anyhow_fields_are_checked_after_the_location_arguments(
     let clean = "use concord_telemetry::error_at; \
                  fn f() { error_at!(file!(), line!(), module_path!(), &e, runtime_session_id = 1); }";
     let local = Registry::shared()
-        .with_local("[fields]\nruntime_session_id = { meaning = \"s\" }")
+        .with_local("[fields]\nruntime_session_id = { type = \"str\", meaning = \"s\" }")
         .expect("local registry");
     assert!(scan_with(&local, clean).is_empty());
     assert_eq!(scan("src/lib.rs", clean), vec!["unregistered-field"]);
@@ -164,7 +164,7 @@ fn declared_wrapper_macros_are_checked_and_undeclared_ones_ignored() {
     // Another macro stays ignored, and a registered field is clean.
     assert!(scan_with(&declared, "fn f() { other!(err, widget = 1); }").is_empty());
     let registered = declared
-        .with_local("[fields]\nwidget = { meaning = \"w\" }")
+        .with_local("[fields]\nwidget = { type = \"int\", meaning = \"w\" }")
         .expect("overlay");
     assert!(scan_with(&registered, "fn f() { record_error!(err, widget = 1); }").is_empty());
 }

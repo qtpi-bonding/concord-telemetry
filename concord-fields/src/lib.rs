@@ -3,8 +3,12 @@
 //! rule that reads the registry) both depend on it, so a layout change cannot
 //! make one of them stop enforcing what the other still does.
 
+mod registry;
+
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
+
+pub use registry::{label_names, FieldVerdict, Registry};
 
 /// The registry shared by every repo, embedded at build time.
 pub const SHARED: &str = include_str!("../../fields.toml");
@@ -16,13 +20,29 @@ pub const LABEL_PREFIX: &str = "concord.label.";
 /// `concord.label_conflicts`, ...). No field or baggage key may be in it.
 pub const RESERVED_NAMESPACE: &str = "concord.";
 
+/// The longest value of a free-text field, in bytes.
+pub const FREE_TEXT_MAX: usize = 1024;
+
+/// The type a registered field carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldType {
+    Str,
+    Int,
+    Float,
+    Bool,
+}
+
 /// One registered field.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FieldDef {
     pub meaning: String,
+    pub ty: FieldType,
     /// `label = true`: the field is carried as baggage (a label), and must not
     /// be recorded through `Debug`.
     pub label: bool,
+    /// `free_text = true`: a string whose value may be up to `FREE_TEXT_MAX`.
+    pub free_text: bool,
 }
 
 /// A parsed registry file.
@@ -33,6 +53,31 @@ pub struct Parsed {
     /// `[lint] log_macros`: a repo's own wrapper macros (bare names) that the
     /// lint treats as field-bearing: first argument the error, the rest fields.
     pub log_macros: BTreeSet<String>,
+}
+
+/// Why a registry file was refused.
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error("{0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("{name} is in the reserved namespace concord.")]
+    ReservedNamespace { name: String },
+    #[error("{name} has no type (expected str, int, float or bool)")]
+    MissingType { name: String },
+    #[error("{name} has unknown type `{found}` (expected str, int, float or bool)")]
+    UnknownType { name: String, found: String },
+    #[error("{name} is a label, so its type must be str")]
+    LabelNotStr { name: String },
+    #[error("{name} cannot be both a label and free_text")]
+    LabelAndFreeText { name: String },
+    #[error("[lint] log_macros entry `{name}` must be a bare macro name other than a built-in error or tracing macro")]
+    BadLogMacro { name: String },
+    #[error("{name} shadows a shared name")]
+    Shadows { name: String },
+    #[error("{name} is registered and never-log")]
+    NeverAndRegistered { name: String },
+    #[error("{name} is a never-log name")]
+    NeverName { name: String },
 }
 
 #[derive(Default, Deserialize)]
@@ -55,7 +100,12 @@ struct Document {
 struct Definition {
     meaning: String,
     #[serde(default)]
+    #[serde(rename = "type")]
+    ty: Option<String>,
+    #[serde(default)]
     label: bool,
+    #[serde(default)]
+    free_text: bool,
 }
 
 #[derive(Default, Deserialize)]
@@ -64,22 +114,45 @@ struct Never {
     names: Vec<String>,
 }
 
+fn field_type(name: &str, found: Option<String>) -> Result<FieldType, ParseError> {
+    match found.as_deref() {
+        None => Err(ParseError::MissingType {
+            name: name.to_string(),
+        }),
+        Some("str") => Ok(FieldType::Str),
+        Some("int") => Ok(FieldType::Int),
+        Some("float") => Ok(FieldType::Float),
+        Some("bool") => Ok(FieldType::Bool),
+        Some(other) => Err(ParseError::UnknownType {
+            name: name.to_string(),
+            found: other.to_string(),
+        }),
+    }
+}
+
 /// Parses a registry file. A field in the reserved `concord.` namespace is an
 /// error.
-pub fn parse(source: &str) -> Result<Parsed, String> {
-    let document: Document = toml::from_str(source).map_err(|error| error.to_string())?;
+pub fn parse(source: &str) -> Result<Parsed, ParseError> {
+    let document: Document = toml::from_str(source)?;
     let mut names = BTreeMap::new();
     for (name, definition) in document.fields {
         if name.starts_with(RESERVED_NAMESPACE) {
-            return Err(format!(
-                "{name} is in the reserved namespace {RESERVED_NAMESPACE}"
-            ));
+            return Err(ParseError::ReservedNamespace { name });
+        }
+        let ty = field_type(&name, definition.ty)?;
+        if definition.label && ty != FieldType::Str {
+            return Err(ParseError::LabelNotStr { name });
+        }
+        if definition.label && definition.free_text {
+            return Err(ParseError::LabelAndFreeText { name });
         }
         names.insert(
             name,
             FieldDef {
                 meaning: definition.meaning,
+                ty,
                 label: definition.label,
+                free_text: definition.free_text,
             },
         );
     }
@@ -103,9 +176,7 @@ pub fn parse(source: &str) -> Result<Parsed, String> {
             ]
             .contains(&name.as_str())
         {
-            return Err(format!(
-                "[lint] log_macros entry `{name}` must be a bare macro name other than a built-in error or tracing macro"
-            ));
+            return Err(ParseError::BadLogMacro { name });
         }
         log_macros.insert(name);
     }
@@ -139,9 +210,9 @@ mod tests {
     #[test]
     fn the_label_flag_and_the_type_column() {
         let parsed = parse(
-            "[fields]\naction_id = { meaning = \"x\", label = true }\nname = { type = \"str\", meaning = \"y\" }\n",
+            "[fields]\naction_id = { type = \"str\", meaning = \"x\", label = true }\nname = { type = \"str\", meaning = \"y\" }\n",
         )
-        .expect("parses; the old type column is ignored");
+        .expect("parses");
         assert!(parsed.names["action_id"].label);
         assert!(!parsed.names["name"].label);
     }
@@ -149,9 +220,9 @@ mod tests {
     #[test]
     fn the_reserved_namespace_is_not_a_field_name() {
         for name in ["concord.label.x", "concord.trace.y", "concord.anything"] {
-            let source = format!("[fields]\n\"{name}\" = {{ meaning = \"x\" }}\n");
+            let source = format!("[fields]\n\"{name}\" = {{ type = \"str\", meaning = \"x\" }}\n");
             let error = parse(&source).unwrap_err();
-            assert!(error.contains("reserved"), "{error}");
+            assert!(error.to_string().contains("reserved"), "{error}");
         }
     }
 

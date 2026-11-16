@@ -1,6 +1,6 @@
 [package]
 name = "concord-fields"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -9,3 +9,4 @@ description = "The shared field registry (fields.toml) parser, for concord-lint 
 [dependencies]
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+thiserror = "2"

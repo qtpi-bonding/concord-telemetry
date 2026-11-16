@@ -7,7 +7,7 @@ use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{Attribute, Expr, ExprCall, ItemFn, ItemImpl, ItemMod, Macro, Path as SynPath};
 
-use crate::registry::{FieldVerdict, Registry};
+use concord_fields::{FieldVerdict, Registry};
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Violation {

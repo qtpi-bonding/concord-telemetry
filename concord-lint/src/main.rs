@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use concord_fields::Registry;
 use concord_lint::baseline;
-use concord_lint::registry::Registry;
 use concord_lint::scan::{scan_file, Violation};
 
 fn main() -> ExitCode {
@@ -49,7 +49,7 @@ fn run(args: Vec<String>) -> Result<u8, String> {
     let mut registry = Registry::shared();
     if let Some(path) = local {
         let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-        registry = registry.with_local(&text)?;
+        registry = registry.with_local(&text).map_err(|e| e.to_string())?;
     }
     let mut violations = Vec::new();
     for path in paths {

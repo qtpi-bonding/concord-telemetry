@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use concord_fields::FieldDef;
-use concord_fields::RESERVED_NAMESPACE;
+use crate::{parse, FieldDef, ParseError, Parsed, RESERVED_NAMESPACE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldVerdict {
@@ -22,25 +21,25 @@ pub struct Registry {
 
 impl Registry {
     pub fn shared() -> Registry {
-        from_parsed(concord_fields::shared())
+        from_parsed(crate::shared())
     }
 
-    pub fn with_local(mut self, source: &str) -> Result<Registry, String> {
-        let local = from_parsed(concord_fields::parse(source)?);
+    pub fn with_local(mut self, source: &str) -> Result<Registry, ParseError> {
+        let local = from_parsed(parse(source)?);
         for name in local.names.keys() {
             if local.never.contains(name) {
-                return Err(format!("{name} is registered and never-log"));
+                return Err(ParseError::NeverAndRegistered { name: name.clone() });
             }
             if self.names.contains_key(name) {
-                return Err(format!("{name} shadows a shared name"));
+                return Err(ParseError::Shadows { name: name.clone() });
             }
             if self.never.contains(name) {
-                return Err(format!("{name} is a never-log name"));
+                return Err(ParseError::NeverName { name: name.clone() });
             }
         }
         for name in &local.never {
             if self.names.contains_key(name) {
-                return Err(format!("{name} is registered and never-log"));
+                return Err(ParseError::NeverAndRegistered { name: name.clone() });
             }
         }
         self.names.extend(local.names);
@@ -52,6 +51,20 @@ impl Registry {
     /// True when `name` is registered with `label = true`.
     pub fn is_label(&self, name: &str) -> bool {
         self.names.get(name).is_some_and(|def| def.label)
+    }
+
+    /// True when `name` is registered with `free_text = true`.
+    pub fn is_free_text(&self, name: &str) -> bool {
+        self.names.get(name).is_some_and(|def| def.free_text)
+    }
+
+    /// The registered names with `label = true`, sorted.
+    pub fn label_names(&self) -> Vec<String> {
+        self.names
+            .iter()
+            .filter(|(_, def)| def.label)
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 
     pub fn check(&self, name: &str) -> FieldVerdict {
@@ -67,7 +80,12 @@ impl Registry {
     }
 }
 
-fn from_parsed(parsed: concord_fields::Parsed) -> Registry {
+/// The label names of the shared registry, sorted.
+pub fn label_names() -> Vec<String> {
+    Registry::shared().label_names()
+}
+
+fn from_parsed(parsed: Parsed) -> Registry {
     Registry {
         names: parsed.names,
         never: parsed.never,
@@ -79,10 +97,6 @@ fn reserved(name: &str) -> bool {
     matches!(
         name,
         "event.type"
-            | "error.code"
-            | "error.class"
-            | "error.fingerprint"
-            | "error.source"
             | "principal.kind"
             | "principal.id"
             | "principal.verified_by"
