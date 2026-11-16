@@ -235,6 +235,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tonic",
  "tower",
  "tower-layer",
  "tower-service",
