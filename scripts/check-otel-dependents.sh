@@ -28,7 +28,7 @@ fi
 SLOT="${CARGO_SLOT-$(command -v cargo-slot || true)}"
 
 # An explicit compare, not a grep.
-deps="$($SLOT cargo tree "${manifest[@]}" "${pkg[@]}" -e normal -i opentelemetry --depth 1 --prefix none | awk '{print $1}' | sort -u)"
+deps="$($SLOT cargo tree ${manifest[@]+"${manifest[@]}"} ${pkg[@]+"${pkg[@]}"} -e normal -i opentelemetry --depth 1 --prefix none | awk '{print $1}' | sort -u)"
 allowed="$(printf '%s\n' "$@" opentelemetry opentelemetry-appender-tracing opentelemetry-http \
   opentelemetry-otlp opentelemetry-proto opentelemetry_sdk tracing-opentelemetry | sort -u)"
 unexpected="$(comm -23 <(printf '%s\n' "$deps") <(printf '%s\n' "$allowed"))"

@@ -13,6 +13,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 cat > "$work/stub" <<'S'
 #!/usr/bin/env bash
 echo "$*" >> "$STUB_LOG"
+pwd >> "$STUB_LOG.cwd"
 case "$*" in
   *"cargo tree"*)
     for a in "$@"; do
@@ -114,10 +115,41 @@ has_telemetry_passes_and_fails() {
   if "$here/check-has-telemetry.sh" -p app 2>/dev/null; then fail "opentelemetry_sdk alone satisfies has-telemetry"; fi
 }
 
+no_optional_args_runs_under_nounset() {
+  clean_tree
+  "$here/check-no-telemetry.sh" || fail "check-no-telemetry.sh with no optional args failed"
+  tree_with opentelemetry
+  "$here/check-has-telemetry.sh" || fail "check-has-telemetry.sh with no args failed"
+  clean_tree
+  "$here/check-otel-dependents.sh" concord-telemetry || fail "check-otel-dependents.sh without -C failed"
+  grep -q -- "--workspace" "$STUB_LOG" || fail "default --workspace not passed"
+  if grep -q -- "--manifest-path" "$STUB_LOG"; then fail "--manifest-path passed without -C"; fi
+}
+
+otel_dependents_dash_c_passes_manifest_path() {
+  clean_tree
+  mkdir -p "$work/proj"
+  "$here/check-otel-dependents.sh" -C "$work/proj" -p app concord-telemetry || fail "-C run failed"
+  grep -q -- "--manifest-path $work/proj/Cargo.toml" "$STUB_LOG" || fail "-C not mapped to --manifest-path: $(cat "$STUB_LOG")"
+  grep -q -- "-p app" "$STUB_LOG" || fail "-p not passed with -C"
+  [ "$(cat "$STUB_LOG.cwd")" = "$PWD" ] || fail "-C changed cwd: $(cat "$STUB_LOG.cwd")"
+}
+
+no_bare_array_expansions() {
+  # bash 3.2 aborts under set -u on "${arr[@]}" of an empty array; only the
+  # ${arr[@]+"${arr[@]}"} form is safe. ${#arr[@]} is fine.
+  local bad f
+  for f in "$here"/check-*.sh "$here"/concord-lint-for-lock.sh "$here"/lib/*.sh; do
+    bad="$(sed -E 's/\$\{([A-Za-z_]+)\[@\]\+"\$\{\1\[@\]\}"\}//g' "$f" | grep -nE '\$\{[A-Za-z_]+\[@\]\}' || true)"
+    [ -z "$bad" ] || fail "bare array expansion in $f: $bad"
+  done
+}
+
 for t in path_flag_prints_binary_path no_flag_prints_rev lock_sh_sourced_runs_nothing \
   no_telemetry_passes_on_clean_tree no_telemetry_fails_on_opentelemetry_sdk \
-  no_telemetry_also_catches_extra_name has_telemetry_passes_and_fails; do
-  : > "$STUB_LOG"; rm -rf "$HOME/.cache"
+  no_telemetry_also_catches_extra_name has_telemetry_passes_and_fails \
+  no_optional_args_runs_under_nounset otel_dependents_dash_c_passes_manifest_path no_bare_array_expansions; do
+  : > "$STUB_LOG"; : > "$STUB_LOG.cwd"; rm -rf "$HOME/.cache"
   "$t"; echo "ok $t"
 done
 echo "check-scripts: ok"

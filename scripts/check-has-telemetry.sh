@@ -20,7 +20,7 @@ done
 
 SLOT="${CARGO_SLOT-$(command -v cargo-slot || true)}"
 
-tree="$($SLOT cargo tree "${pkgs[@]}" -e normal)" \
+tree="$($SLOT cargo tree ${pkgs[@]+"${pkgs[@]}"} -e normal)" \
   || { echo "cargo tree failed" >&2; exit 1; }
 names="$(printf '%s\n' "$tree" | grep -oE '[A-Za-z0-9_-]+ v[0-9]' | awk '{print $1}' | sort -u)"
 
