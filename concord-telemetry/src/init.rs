@@ -22,6 +22,8 @@ pub const EVENT_TARGET: &str = "concord_telemetry::event";
 pub(crate) const GRPC_TARGET: &str = "concord_telemetry::grpc";
 pub(crate) const HTTP_TARGET: &str = "concord_telemetry::http";
 
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Config {
     pub service_name: &'static str,
     pub service_version: &'static str,
@@ -63,6 +65,8 @@ impl Config {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LocalOutput {
     Text,
     Json,
@@ -71,11 +75,12 @@ pub enum LocalOutput {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum InitError {
     #[error("a global tracing subscriber is already set")]
     AlreadyInitialized,
     #[error("OTLP exporter: {0}")]
-    Exporter(String),
+    Exporter(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("opening the JSON log file: {0}")]
     JsonFile(#[source] std::io::Error),
 }
@@ -376,12 +381,12 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .build()
-            .map_err(|error| InitError::Exporter(error.to_string()))?;
+            .map_err(|error| InitError::Exporter(Box::new(error)))?;
         let span_exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .build()
-            .map_err(|error| InitError::Exporter(error.to_string()))?;
+            .map_err(|error| InitError::Exporter(Box::new(error)))?;
         let logs = SdkLoggerProvider::builder()
             .with_resource(resource.clone())
             .with_log_processor(BaggageLogProcessor(
