@@ -31,6 +31,7 @@ pub struct IngressService<S> {
 #[derive(Clone, Debug)]
 pub struct ServerSpan {
     span: Span,
+    #[cfg(feature = "otel")]
     method: http::Method,
 }
 
@@ -38,15 +39,18 @@ impl ServerSpan {
     /// Records the matched route (a template such as `/items/{id}`, never the
     /// concrete path): `http.route`, and the span's name `{method} {route}`.
     pub fn record_route(&self, route: &str) {
-        use opentelemetry::trace::TraceContextExt as _;
-        use tracing_opentelemetry::OpenTelemetrySpanExt as _;
         self.span.record("http.route", route);
         // The span has started by now (the handler runs inside it), and
         // tracing-opentelemetry ignores an `otel.name` recorded after that.
-        self.span
-            .context()
-            .span()
-            .update_name(format!("{} {route}", self.method));
+        #[cfg(feature = "otel")]
+        {
+            use opentelemetry::trace::TraceContextExt as _;
+            use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+            self.span
+                .context()
+                .span()
+                .update_name(format!("{} {route}", self.method));
+        }
     }
 
     /// The span itself.
@@ -138,9 +142,11 @@ where
                 .map(str::to_owned)
         });
         carrier::extract_ingress("http", &span, &incoming);
+        #[cfg(feature = "otel")]
         let method = request.method().clone();
         request.extensions_mut().insert(ServerSpan {
             span: span.clone(),
+            #[cfg(feature = "otel")]
             method,
         });
         let future = span.in_scope(|| self.inner.call(request));

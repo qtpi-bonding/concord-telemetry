@@ -1,4 +1,5 @@
 //! `event!` evaluates its argument outside any closure: `.await` and `?` work in it.
+#![cfg(feature = "testing")]
 
 #[allow(dead_code)]
 #[path = "proto/fixtures.rs"]

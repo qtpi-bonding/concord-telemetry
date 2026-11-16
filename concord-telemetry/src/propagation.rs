@@ -5,17 +5,21 @@
 //! Without an OTLP exporter there is no OpenTelemetry span layer, so nothing
 //! is injected and `set_parent` does nothing.
 
+#[cfg(feature = "otel")]
 use crate::{baggage, carrier};
+#[cfg(feature = "otel")]
 use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
+#[cfg(feature = "otel")]
 use opentelemetry::trace::TraceContextExt;
+#[cfg(feature = "otel")]
 use opentelemetry_sdk::propagation::TraceContextPropagator;
+#[cfg(feature = "otel")]
 use std::collections::HashMap;
+#[cfg(feature = "otel")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// The environment variables hooks and CLIs read and write.
 pub use concord_telemetry_proto::{BAGGAGE_ENV, TRACEPARENT_ENV};
-
-const KEYS: [&str; 2] = ["traceparent", "tracestate"];
 
 /// The current span's context as a W3C `traceparent`, if it has one.
 pub fn traceparent() -> Option<String> {
@@ -30,7 +34,9 @@ pub fn traceparent() -> Option<String> {
 
 /// Writes the current span's `traceparent`, and `tracestate` when it is not
 /// empty, through `set`, then its `baggage` when it has any.
+#[cfg(feature = "otel")]
 pub fn inject(mut set: impl FnMut(&str, String)) {
+    const KEYS: [&str; 2] = ["traceparent", "tracestate"];
     let current = tracing::Span::current();
     let context = current.context();
     if context.span().span_context().is_valid() {
@@ -47,6 +53,10 @@ pub fn inject(mut set: impl FnMut(&str, String)) {
     }
 }
 
+/// `inject` with the otel feature off: nothing is written.
+#[cfg(not(feature = "otel"))]
+pub fn inject(_set: impl FnMut(&str, String)) {}
+
 /// Parents `span` on the context read through `get`, and takes its `baggage`.
 /// Call it before `span` is first entered. A carrier without a valid
 /// `traceparent` leaves the span's contextual parent in place.
@@ -55,6 +65,7 @@ pub fn set_parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>) {
 }
 
 /// `set_parent`, saying whether the carrier held a valid `traceparent`.
+#[cfg(feature = "otel")]
 pub(crate) fn parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>) -> bool {
     let context = carrier::extract_context(&get);
     let valid = context.span().span_context().is_valid();
@@ -69,6 +80,13 @@ pub(crate) fn parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>)
         }
     }
     valid
+}
+
+/// `parent` with the otel feature off: no parent is set and nothing is
+/// reported, so no carrier counts as valid.
+#[cfg(not(feature = "otel"))]
+pub(crate) fn parent(_span: &tracing::Span, _get: impl Fn(&str) -> Option<String>) -> bool {
+    false
 }
 
 /// `set_parent` from the `TRACEPARENT` and `BAGGAGE` environment variables.
@@ -87,8 +105,10 @@ pub fn set_parent_from_env(span: &tracing::Span) {
 pub use concord_telemetry_proto::inject_env;
 
 /// Injects into a map.
+#[cfg(feature = "otel")]
 pub(crate) struct Carrier<'a>(pub &'a mut HashMap<String, String>);
 
+#[cfg(feature = "otel")]
 impl Injector for Carrier<'_> {
     fn set(&mut self, key: &str, value: String) {
         self.0.insert(key.to_owned(), value);
@@ -96,8 +116,10 @@ impl Injector for Carrier<'_> {
 }
 
 /// Extracts from a map.
+#[cfg(feature = "otel")]
 pub(crate) struct Fields<'a>(pub &'a HashMap<String, String>);
 
+#[cfg(feature = "otel")]
 impl Extractor for Fields<'_> {
     fn get(&self, key: &str) -> Option<&str> {
         self.0.get(key).map(String::as_str)

@@ -1,4 +1,5 @@
 //! The panic hook waits no longer than `Config::flush_deadline`.
+#![cfg(feature = "otel")]
 
 use concord_telemetry::{init, Config, LocalOutput};
 use std::net::TcpListener;

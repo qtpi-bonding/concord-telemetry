@@ -1,12 +1,20 @@
-use crate::logfmt::{BaggageBridge, BaggageLogProcessor, TraceFormat};
-use crate::{deadline::run_with_deadline, panic, Principal, PrincipalKind};
+use crate::logfmt::TraceFormat;
+#[cfg(feature = "otel")]
+use crate::logfmt::{BaggageBridge, BaggageLogProcessor};
+#[cfg(feature = "otel")]
+use crate::{deadline::run_with_deadline, PrincipalKind};
+use crate::{panic, Principal};
+#[cfg(feature = "otel")]
 use opentelemetry::KeyValue;
+#[cfg(feature = "otel")]
 use opentelemetry_otlp::{Protocol, WithExportConfig};
+#[cfg(feature = "otel")]
 use opentelemetry_sdk::{
     logs::{BatchLogProcessor, SdkLoggerProvider},
     trace::{BatchSpanProcessor, SdkTracerProvider},
     Resource,
 };
+#[cfg(feature = "otel")]
 use std::hash::{BuildHasher, Hasher};
 use std::{fs::OpenOptions, io::IsTerminal, path::PathBuf, sync::Mutex, time::Duration};
 use tracing_subscriber::{
@@ -85,12 +93,18 @@ pub enum InitError {
     JsonFile(#[source] std::io::Error),
 }
 
+/// Flushes and shuts the exporters down when dropped. Without the `otel`
+/// feature there is nothing to flush and dropping it does nothing.
 pub struct Guard {
+    #[cfg(feature = "otel")]
     logs: Option<SdkLoggerProvider>,
+    #[cfg(feature = "otel")]
     traces: Option<SdkTracerProvider>,
+    #[cfg(feature = "otel")]
     deadline: Duration,
 }
 
+#[cfg(feature = "otel")]
 impl Drop for Guard {
     fn drop(&mut self) {
         let logs = self.logs.take();
@@ -158,12 +172,14 @@ fn directive(target: &str, level: LevelFilter) -> Directive {
 
 /// Resource keys the environment cannot set: the service's identity is the
 /// caller's, the instance id is generated, and principals come from `Config`.
+#[cfg(feature = "otel")]
 fn reserved(key: &str) -> bool {
     key == "service.name" || key == "service.instance.id" || key.starts_with("principal.")
 }
 
 /// Percent-decodes an `OTEL_RESOURCE_ATTRIBUTES` value; `None` on a malformed
 /// escape or bytes that are not UTF-8.
+#[cfg(feature = "otel")]
 fn percent_decode(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -187,6 +203,7 @@ fn percent_decode(value: &str) -> Option<String> {
 /// Parses `OTEL_RESOURCE_ATTRIBUTES` (`k1=v1,k2=v2`, values percent-encoded).
 /// An entry that is malformed (no `=`, empty key, bad escape) or reserved is
 /// skipped; the rest still apply.
+#[cfg(feature = "otel")]
 fn env_attributes(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
         .filter_map(|entry| {
@@ -201,6 +218,7 @@ fn env_attributes(raw: &str) -> Vec<(String, String)> {
 }
 
 /// The machine's hostname, if it can be read.
+#[cfg(feature = "otel")]
 fn hostname() -> Option<String> {
     #[cfg(unix)]
     {
@@ -222,6 +240,7 @@ fn hostname() -> Option<String> {
     }
 }
 
+#[cfg(feature = "otel")]
 fn resource(config: &Config) -> Resource {
     resource_with(
         config,
@@ -233,6 +252,7 @@ fn resource(config: &Config) -> Resource {
 /// `service.version` from `OTEL_RESOURCE_ATTRIBUTES` overrides
 /// `Config::service_version`; `host.name` is the machine hostname unless the
 /// environment sets it. Other environment attributes are added as they come.
+#[cfg(feature = "otel")]
 fn resource_with(config: &Config, env: Option<&str>, host: Option<String>) -> Resource {
     let env = env.map(env_attributes).unwrap_or_default();
     let from_env = |key: &str| {
@@ -352,6 +372,7 @@ where
     Ok(Some(layer))
 }
 
+#[cfg(feature = "otel")]
 fn log_bridge_layer<S>(provider: &SdkLoggerProvider) -> BoxedLayer<S>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
@@ -361,6 +382,7 @@ where
     ))
 }
 
+#[cfg(feature = "otel")]
 fn span_layer<S>(provider: &SdkTracerProvider) -> BoxedLayer<S>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
@@ -369,65 +391,87 @@ where
     Box::new(tracing_opentelemetry::layer().with_tracer(provider.tracer("concord-telemetry")))
 }
 
+/// The OTLP log and trace providers, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+#[cfg(feature = "otel")]
+fn exporters(
+    config: &Config,
+) -> Result<(Option<SdkLoggerProvider>, Option<SdkTracerProvider>), InitError> {
+    if std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_none() {
+        return Ok((None, None));
+    }
+    let resource = resource(config);
+    let log_exporter = opentelemetry_otlp::LogExporter::builder()
+        .with_http()
+        .with_protocol(Protocol::HttpBinary)
+        .build()
+        .map_err(|error| InitError::Exporter(Box::new(error)))?;
+    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_http()
+        .with_protocol(Protocol::HttpBinary)
+        .build()
+        .map_err(|error| InitError::Exporter(Box::new(error)))?;
+    let logs = SdkLoggerProvider::builder()
+        .with_resource(resource.clone())
+        .with_log_processor(BaggageLogProcessor(
+            BatchLogProcessor::builder(log_exporter).build(),
+        ))
+        .build();
+    let traces = SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_max_attributes_per_span(crate::label_collapse::MAX_SPAN_ATTRIBUTES)
+        .with_span_processor(crate::LabelCollapse(
+            BatchSpanProcessor::builder(span_exporter).build(),
+        ))
+        .build();
+    Ok((Some(logs), Some(traces)))
+}
+
 pub fn init(config: Config) -> Result<Guard, InitError> {
     if tracing::dispatcher::has_been_set() {
         return Err(InitError::AlreadyInitialized);
     }
     let unknown_error_text = crate::error::set_error_text_from_env();
 
-    let resource = resource(&config);
-    let (logs, traces) = if std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_some() {
-        let log_exporter = opentelemetry_otlp::LogExporter::builder()
-            .with_http()
-            .with_protocol(Protocol::HttpBinary)
-            .build()
-            .map_err(|error| InitError::Exporter(Box::new(error)))?;
-        let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .with_protocol(Protocol::HttpBinary)
-            .build()
-            .map_err(|error| InitError::Exporter(Box::new(error)))?;
-        let logs = SdkLoggerProvider::builder()
-            .with_resource(resource.clone())
-            .with_log_processor(BaggageLogProcessor(
-                BatchLogProcessor::builder(log_exporter).build(),
-            ))
-            .build();
-        let traces = SdkTracerProvider::builder()
-            .with_resource(resource)
-            .with_max_attributes_per_span(crate::label_collapse::MAX_SPAN_ATTRIBUTES)
-            .with_span_processor(crate::LabelCollapse(
-                BatchSpanProcessor::builder(span_exporter).build(),
-            ))
-            .build();
-        (Some(logs), Some(traces))
-    } else {
-        (None, None)
-    };
+    #[cfg(feature = "otel")]
+    let (logs, traces) = exporters(&config)?;
 
     let local = local_layer(config.local)?;
-    let log_layer = logs.as_ref().map(log_bridge_layer);
-    let trace_layer = traces.as_ref().map(span_layer);
-    let baggage_layer = traces.as_ref().map(|_| crate::baggage::BaggageLayer);
-
+    #[cfg(feature = "otel")]
+    let subscriber = {
+        let log_layer = logs.as_ref().map(log_bridge_layer);
+        let trace_layer = traces.as_ref().map(span_layer);
+        let baggage_layer = traces.as_ref().map(|_| crate::baggage::BaggageLayer);
+        tracing_subscriber::registry()
+            .with(filter(logs.is_some()))
+            .with(trace_layer)
+            .with(baggage_layer)
+            .with(log_layer)
+            .with(local)
+    };
+    #[cfg(not(feature = "otel"))]
     let subscriber = tracing_subscriber::registry()
-        .with(filter(logs.is_some()))
-        .with(trace_layer)
-        .with(baggage_layer)
-        .with(log_layer)
+        .with(filter(false))
         .with(local);
     if subscriber.try_init().is_err() {
         return Err(InitError::AlreadyInitialized);
     }
 
-    crate::carrier::set_otel_active(traces.is_some());
-    panic::install(logs.clone(), traces.clone(), config.flush_deadline);
+    #[cfg(feature = "otel")]
+    {
+        crate::carrier::set_otel_active(traces.is_some());
+        panic::install(logs.clone(), traces.clone(), config.flush_deadline);
+    }
+    #[cfg(not(feature = "otel"))]
+    panic::install();
     if let Some(value) = unknown_error_text.as_deref() {
         crate::error::warn_unknown_error_text(value);
     }
     Ok(Guard {
+        #[cfg(feature = "otel")]
         logs,
+        #[cfg(feature = "otel")]
         traces,
+        #[cfg(feature = "otel")]
         deadline: config.flush_deadline,
     })
 }
@@ -480,7 +524,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "otel"))]
 mod resource_tests {
     use super::*;
     use opentelemetry::Key;

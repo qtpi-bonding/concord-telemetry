@@ -50,8 +50,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::{Context as LayerContext, Layer};
 use tracing_subscriber::registry::{LookupSpan, Registry};
 
-/// The most entries one span's baggage holds.
-pub const MAX_ENTRIES: usize = 24;
+/// The most entries one span's baggage holds. Defined in `carrier::context`.
+pub use crate::carrier::context::MAX_ENTRIES;
 pub(crate) const MAX_KEY: usize = 64;
 pub(crate) const MAX_VALUE: usize = 256;
 pub(crate) const MAX_HEADER: usize = 8192;

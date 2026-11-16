@@ -260,6 +260,28 @@ macro_rules! error_at_anyhow {
     }};
 }
 
+/// Marks `span` as failed with the error's code and class: the `error.code` and
+/// `error.class` span attributes and an error status. Only the OpenTelemetry
+/// span carries them, so without the `otel` feature this does nothing. The
+/// macros call it so that their expansions never name an OpenTelemetry type.
+#[doc(hidden)]
+pub fn record_error_span(span: &tracing::Span, facts: &coded_error::Facts) {
+    #[cfg(feature = "otel")]
+    {
+        use opentelemetry::trace::Status;
+        use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+        span.set_attribute("error.code", facts.code);
+        span.set_attribute("error.class", facts.class.as_str());
+        span.set_status(Status::Error {
+            description: "error".into(),
+        });
+    }
+    #[cfg(not(feature = "otel"))]
+    {
+        let _ = (span, facts);
+    }
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __emit_error {
@@ -269,10 +291,7 @@ macro_rules! __emit_error {
         let source: &str = $source;
         let (chain_json, message) = $crate::__private::error::chain_json(&chain, $crate::error_text());
         let current = $crate::__private::tracing::Span::current();
-        use $crate::__private::tracing_opentelemetry::OpenTelemetrySpanExt as _;
-        current.set_attribute("error.code", facts.code);
-        current.set_attribute("error.class", facts.class.as_str());
-        current.set_status($crate::__private::opentelemetry::trace::Status::Error { description: "error".into() });
+        $crate::__private::record_error_span(&current, &facts);
         let fingerprint = $crate::__private::coded_error::fingerprint(facts.code, facts.class, source);
         $crate::__private::tracing::event!(
             name: "error", target: $crate::EVENT_TARGET, $crate::__private::tracing::Level::ERROR,

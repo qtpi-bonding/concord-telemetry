@@ -1,4 +1,5 @@
 #![cfg(feature = "http-server")]
+#![cfg(feature = "testing")]
 
 use concord_telemetry::carrier;
 use concord_telemetry::http_server::{IngressLayer, ServerSpan};

@@ -1,3 +1,4 @@
+#![cfg(feature = "testing")]
 use concord_telemetry::grpc::{client, ServerLayer};
 use concord_telemetry::propagation::traceparent;
 use concord_telemetry::testing::{capture_exclusive, set_otel_active};

@@ -1,3 +1,4 @@
+#![cfg(feature = "otel")]
 use concord_telemetry::{init, Config, LocalOutput};
 use std::net::TcpListener;
 use std::panic;

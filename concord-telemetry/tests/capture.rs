@@ -1,3 +1,4 @@
+#![cfg(feature = "testing")]
 use opentelemetry::trace::TraceContextExt as _;
 #[allow(dead_code)]
 #[path = "proto/fixtures.rs"]

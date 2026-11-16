@@ -6,16 +6,27 @@
 //! is never recorded.
 
 use crate::coded::emit_coded;
+use crate::init::EVENT_TARGET;
+#[cfg(feature = "otel")]
 use crate::propagation::Fields;
-use crate::{baggage, init::EVENT_TARGET, propagation};
+#[cfg(feature = "otel")]
+use crate::{baggage, propagation};
 use coded_error::ErrorClass;
 use concord_telemetry_proto::TraceCarrier;
+#[cfg(feature = "otel")]
 use opentelemetry::propagation::TextMapPropagator;
+#[cfg(feature = "otel")]
 use opentelemetry::trace::TraceContextExt;
+#[cfg(feature = "otel")]
 use opentelemetry_sdk::propagation::TraceContextPropagator;
+#[cfg(feature = "otel")]
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "otel")]
+use std::sync::atomic::AtomicBool;
+#[cfg(feature = "otel")]
+use std::sync::atomic::Ordering;
 use tracing::Span;
+#[cfg(feature = "otel")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Code of the record emitted when a required hop gets no trace.
@@ -33,24 +44,34 @@ pub const CARRIER_DROPPED_CODE: &str = "concord.trace.carrier_dropped";
 pub const FIELD_DROPPED_CODE: &str = "concord.error.field_dropped";
 
 /// W3C Trace Context: a `tracestate` over this many characters is shortened.
+#[cfg(feature = "otel")]
 const TRACESTATE_MAX: usize = 512;
 /// When shortening, entries longer than this go first.
+#[cfg(feature = "otel")]
 const TRACESTATE_ENTRY_MAX: usize = 128;
 
+#[cfg(feature = "otel")]
 static OTEL_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+#[cfg(feature = "otel")]
 pub(crate) fn set_otel_active(active: bool) {
     OTEL_ACTIVE.store(active, Ordering::Relaxed);
 }
 
+#[cfg(feature = "otel")]
 pub(crate) fn otel_active() -> bool {
     OTEL_ACTIVE.load(Ordering::Relaxed)
+}
+
+#[cfg(not(feature = "otel"))]
+pub(crate) fn otel_active() -> bool {
+    false
 }
 
 /// The current span's trace context and baggage.
 pub fn capture() -> TraceCarrier {
     let mut carrier = TraceCarrier::default();
-    propagation::inject(|key, value| match key {
+    crate::propagation::inject(|key, value| match key {
         "traceparent" => carrier.traceparent = Some(value),
         "tracestate" => carrier.tracestate = Some(value),
         "baggage" => carrier.baggage = Some(value),
@@ -59,6 +80,7 @@ pub fn capture() -> TraceCarrier {
     carrier
 }
 
+#[cfg(feature = "otel")]
 fn getter(c: &TraceCarrier) -> impl Fn(&str) -> Option<String> + '_ {
     |key| match key {
         "traceparent" => c.traceparent.clone(),
@@ -75,14 +97,20 @@ fn getter(c: &TraceCarrier) -> impl Fn(&str) -> Option<String> + '_ {
 /// `traceparent` is refused (`set_parent` cannot re-parent) and so is the
 /// baggage: the labels stay as they were. A carrier without a valid
 /// `traceparent` leaves the span's contextual parent in place.
+#[cfg(feature = "otel")]
 pub fn parent_on(span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
 }
+
+/// `parent_on` with the otel feature off: nothing to parent.
+#[cfg(not(feature = "otel"))]
+pub fn parent_on(_span: &Span, _c: &TraceCarrier) {}
 
 /// Gives `span` a link to the carrier's span context, in a trace of its own.
 /// A link carries span context only, as in OpenTelemetry: the span's labels
 /// are untouched. A caller that wants the linked span's labels calls
 /// `context::add` for each.
+#[cfg(feature = "otel")]
 pub fn link_from(span: &Span, c: &TraceCarrier) {
     let context = extract_context(getter(c));
     let span_context = context.span().span_context().clone();
@@ -92,24 +120,41 @@ pub fn link_from(span: &Span, c: &TraceCarrier) {
     }
 }
 
+/// `link_from` with the otel feature off: no span layer, so no link.
+#[cfg(not(feature = "otel"))]
+pub fn link_from(_span: &Span, _c: &TraceCarrier) {}
+
 /// `parent_on` for a hop that must carry a trace. With an exporter active and
 /// no valid `traceparent` it records `concord.trace.missing` with the field
 /// `hop`.
 pub fn extract_required(hop: &'static str, span: &Span, c: &TraceCarrier) {
-    let valid = propagation::parent(span, getter(c));
-    let malformed = c.traceparent.as_deref().is_some_and(|v| !v.is_empty());
-    if !valid && !malformed && otel_active() {
-        emit_trace_missing(hop);
+    #[cfg(feature = "otel")]
+    {
+        let valid = propagation::parent(span, getter(c));
+        let malformed = c.traceparent.as_deref().is_some_and(|v| !v.is_empty());
+        if !valid && !malformed && otel_active() {
+            emit_trace_missing(hop);
+        }
+    }
+    #[cfg(not(feature = "otel"))]
+    {
+        let _ = (hop, span, c);
     }
 }
 
 /// `parent_on` for an entry point that may legitimately get no trace. It is
 /// silent when the carrier is empty. `name` is recorded on the span as
 /// `ingress`.
+#[cfg(feature = "otel")]
 pub fn extract_ingress(name: &'static str, span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
     span.set_attribute("ingress", name);
 }
+
+/// `extract_ingress` with the otel feature off: no span layer, so nothing is
+/// parented and no attribute is set.
+#[cfg(not(feature = "otel"))]
+pub fn extract_ingress(_name: &'static str, _span: &Span, _c: &TraceCarrier) {}
 
 /// A span with no parent: it starts a trace of its own.
 pub fn root(name: &'static str) -> Span {
@@ -118,17 +163,23 @@ pub fn root(name: &'static str) -> Span {
 
 /// The labels of the current span's baggage. See `carrier` for carrying them.
 pub mod context {
+    #[cfg(feature = "otel")]
     use super::*;
 
     /// The most labels one span's baggage holds.
-    pub const MAX_ENTRIES: usize = crate::baggage::MAX_ENTRIES;
+    pub const MAX_ENTRIES: usize = 24;
 
     /// Adds a label to the current span's baggage and records it as a span
     /// attribute. Children and outgoing carriers inherit it. Over the baggage
     /// caps it is dropped and recorded.
+    #[cfg(feature = "otel")]
     pub fn add(field: &'static str, value: impl Into<String>) {
         baggage::add(&Span::current(), field, value.into());
     }
+
+    /// `add` with the otel feature off: no baggage, so nothing is added.
+    #[cfg(not(feature = "otel"))]
+    pub fn add(_field: &'static str, _value: impl Into<String>) {}
 
     /// Adds the labels of a `baggage` header to the current span, as `add`
     /// does for each entry in header order: a key the span already holds is
@@ -147,14 +198,20 @@ pub mod context {
     /// This is an explicit add, so it works on a span that was already
     /// entered. A span that is not entered is not the current span: call it
     /// inside `span.in_scope(|| ..)`, as with `add`.
+    #[cfg(feature = "otel")]
     pub fn add_from_baggage(header: &str) {
         baggage::add_header(&Span::current(), header);
     }
+
+    /// `add_from_baggage` with the otel feature off: no baggage, so nothing is added.
+    #[cfg(not(feature = "otel"))]
+    pub fn add_from_baggage(_header: &str) {}
 }
 
 /// Records, once each, an incoming `traceparent` that does not parse and a
 /// `tracestate` over its cap. Both are dropped and the request proceeds. A
 /// no-op where the span cannot hold baggage (no exporter).
+#[cfg(feature = "otel")]
 pub(crate) fn report_invalid(span: &Span, get: &impl Fn(&str) -> Option<String>, valid: bool) {
     if !baggage::installed(span) {
         return;
@@ -167,6 +224,7 @@ pub(crate) fn report_invalid(span: &Span, get: &impl Fn(&str) -> Option<String>,
     }
 }
 
+#[cfg(feature = "otel")]
 pub(crate) fn extract_context(get: impl Fn(&str) -> Option<String>) -> opentelemetry::Context {
     let mut fields = HashMap::new();
     if let Some(value) = get("traceparent") {
@@ -184,6 +242,7 @@ pub(crate) fn extract_context(get: impl Fn(&str) -> Option<String>) -> opentelem
 /// A `tracestate` within the cap, as W3C says to shorten one: over
 /// `TRACESTATE_MAX`, entries longer than `TRACESTATE_ENTRY_MAX` go first, then
 /// whole entries from the end. Under the cap it is returned as it is.
+#[cfg(feature = "otel")]
 pub(crate) fn shrink_tracestate(value: &str) -> std::borrow::Cow<'_, str> {
     if value.len() <= TRACESTATE_MAX {
         return std::borrow::Cow::Borrowed(value);
@@ -206,6 +265,7 @@ pub(crate) fn shrink_tracestate(value: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(kept.join(","))
 }
 
+#[cfg(feature = "otel")]
 fn emit_trace_missing(hop: &'static str) {
     emit_coded!(
         tracing::Level::WARN,
@@ -216,6 +276,7 @@ fn emit_trace_missing(hop: &'static str) {
     );
 }
 
+#[cfg(feature = "otel")]
 pub(crate) fn emit_baggage_dropped(count: usize) {
     emit_coded!(
         tracing::Level::WARN,
@@ -236,6 +297,7 @@ pub(crate) fn emit_field_dropped(name: &str) {
     );
 }
 
+#[cfg(feature = "otel")]
 fn emit_carrier_dropped(header: &'static str) {
     emit_coded!(
         tracing::Level::WARN,

@@ -1,4 +1,5 @@
 //! Own binary: `error_at!` records an error with an explicit code location.
+#![cfg(feature = "testing")]
 
 use concord_telemetry::{AttrValue, Attrs};
 

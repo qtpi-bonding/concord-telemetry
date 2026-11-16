@@ -1,3 +1,4 @@
+#![cfg(feature = "testing")]
 use concord_telemetry::propagation::{inject, set_parent, traceparent};
 use concord_telemetry::testing::capture_exclusive;
 use concord_telemetry::EVENT_TARGET;

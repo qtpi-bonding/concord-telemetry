@@ -1,5 +1,6 @@
 //! Own binary: shows `layer()` + `reader()` for a repo that installs its own
 //! subscriber (so `capture()` is not an option).
+#![cfg(feature = "testing")]
 
 #[allow(dead_code)]
 #[path = "proto/fixtures.rs"]

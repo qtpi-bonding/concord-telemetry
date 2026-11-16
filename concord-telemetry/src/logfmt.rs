@@ -12,26 +12,39 @@
 //! into the record's attributes on its way to the real processor. The same
 //! two add the code location (see `location`).
 
+#[cfg(feature = "otel")]
 use crate::baggage::BaggageMap;
+#[cfg(feature = "otel")]
 use opentelemetry::baggage::BaggageExt;
+#[cfg(feature = "otel")]
 use opentelemetry::logs::{AnyValue, LogRecord as _};
+#[cfg(feature = "otel")]
 use opentelemetry::trace::TraceContextExt;
+#[cfg(feature = "otel")]
 use opentelemetry::{Context, KeyValue, Value};
+#[cfg(feature = "otel")]
 use opentelemetry_sdk::logs::{LogProcessor, SdkLogRecord};
+#[cfg(feature = "otel")]
 use opentelemetry_sdk::Resource;
 use std::fmt;
+#[cfg(feature = "otel")]
 use std::sync::Arc;
+#[cfg(feature = "otel")]
 use std::time::Duration;
+#[cfg(feature = "otel")]
 use tracing::Span;
+#[cfg(feature = "otel")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
+#[cfg(feature = "otel")]
 use tracing_subscriber::layer::{Context as LayerContext, Layer};
 use tracing_subscriber::registry::LookupSpan;
 
 /// The trace and span ids of the current span, when it has a valid context.
 /// `Span::current()` sees the subscriber only when it is the global default:
 /// tracing hides a scoped one from code running inside its own dispatch.
+#[cfg(feature = "otel")]
 fn current_ids() -> Option<(String, String)> {
     let context = Span::current().context();
     let span = context.span();
@@ -45,13 +58,51 @@ fn current_ids() -> Option<(String, String)> {
 }
 
 /// A formatter that adds trace fields to the stock formatter's line while
+/// `active` returns true. Without the `otel` feature there are no trace
+/// fields: it formats as the stock formatter does.
+#[cfg(not(feature = "otel"))]
+pub(crate) struct TraceFormat<F> {
+    inner: F,
+}
+
+#[cfg(not(feature = "otel"))]
+impl<F> TraceFormat<F> {
+    pub(crate) fn json(inner: F, _active: fn() -> bool) -> Self {
+        Self { inner }
+    }
+
+    pub(crate) fn text(inner: F, _active: fn() -> bool) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(not(feature = "otel"))]
+impl<S, N, F> FormatEvent<S, N> for TraceFormat<F>
+where
+    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+    F: FormatEvent<S, N>,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        writer: Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> fmt::Result {
+        self.inner.format_event(ctx, writer, event)
+    }
+}
+
+/// A formatter that adds trace fields to the stock formatter's line while
 /// `active` returns true.
+#[cfg(feature = "otel")]
 pub(crate) struct TraceFormat<F> {
     inner: F,
     json: bool,
     active: fn() -> bool,
 }
 
+#[cfg(feature = "otel")]
 impl<F> TraceFormat<F> {
     pub(crate) fn json(inner: F, active: fn() -> bool) -> Self {
         Self {
@@ -70,6 +121,7 @@ impl<F> TraceFormat<F> {
     }
 }
 
+#[cfg(feature = "otel")]
 impl<S, N, F> FormatEvent<S, N> for TraceFormat<F>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
@@ -132,6 +184,7 @@ where
     }
 }
 
+#[cfg(feature = "otel")]
 /// Passes writes through, holding back a trailing newline so a suffix can go
 /// before it.
 struct HoldNewline<'a, 'w> {
@@ -139,6 +192,7 @@ struct HoldNewline<'a, 'w> {
     held: bool,
 }
 
+#[cfg(feature = "otel")]
 impl HoldNewline<'_, '_> {
     fn finish(self, suffix: &str) -> fmt::Result {
         self.out.write_str(suffix)?;
@@ -149,6 +203,7 @@ impl HoldNewline<'_, '_> {
     }
 }
 
+#[cfg(feature = "otel")]
 impl fmt::Write for HoldNewline<'_, '_> {
     fn write_str(&mut self, text: &str) -> fmt::Result {
         if text.is_empty() {
@@ -169,10 +224,12 @@ impl fmt::Write for HoldNewline<'_, '_> {
     }
 }
 
+#[cfg(feature = "otel")]
 /// Wraps the OpenTelemetry log bridge: while the bridge builds a record, the
 /// event's span baggage is the current context's baggage.
 pub(crate) struct BaggageBridge<L>(pub L);
 
+#[cfg(feature = "otel")]
 impl<S, L> Layer<S> for BaggageBridge<L>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
@@ -222,11 +279,13 @@ where
     }
 }
 
+#[cfg(feature = "otel")]
 /// Copies the current context's baggage into each record's attributes, then
 /// hands the record to the wrapped processor.
 #[derive(Debug)]
 pub(crate) struct BaggageLogProcessor<P>(pub P);
 
+#[cfg(feature = "otel")]
 impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
     fn emit(
         &self,
@@ -305,7 +364,7 @@ impl<P: LogProcessor> LogProcessor for BaggageLogProcessor<P> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "otel"))]
 mod tests {
     use super::*;
     use std::fmt::Write as _;

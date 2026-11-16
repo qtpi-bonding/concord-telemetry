@@ -17,6 +17,8 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 
+// Only the OpenTelemetry log processor reads the fields.
+#[cfg_attr(not(feature = "otel"), allow(dead_code))]
 #[derive(Clone)]
 pub(crate) struct Location {
     pub file: Option<Cow<'static, str>>,
@@ -31,6 +33,7 @@ type Extra = RefCell<Vec<(&'static str, crate::AttrValue)>>;
 thread_local! {
     static EXTRA: Extra = const { RefCell::new(Vec::new()) };
     static CALLER: Slot = const { RefCell::new(None) };
+    #[cfg(feature = "otel")]
     static CURRENT: Slot = const { RefCell::new(None) };
 }
 
@@ -79,6 +82,7 @@ pub(crate) fn emit_at_owned(file: &str, line: u32, body: impl FnOnce()) {
 
 /// Runs `body` (the bridge's `on_event`) with the location of `meta`, or the
 /// `event!` call site when there is one, as the current location.
+#[cfg(feature = "otel")]
 pub(crate) fn with_event_location(meta: &'static tracing::Metadata<'static>, body: impl FnOnce()) {
     let location = CALLER
         .with(|cell| cell.borrow().clone())
@@ -92,6 +96,7 @@ pub(crate) fn with_event_location(meta: &'static tracing::Metadata<'static>, bod
 }
 
 /// The location of the record being emitted on this thread, if any.
+#[cfg(feature = "otel")]
 pub(crate) fn current() -> Option<Location> {
     CURRENT.with(|cell| cell.borrow().clone())
 }
@@ -111,6 +116,7 @@ pub(crate) fn with_extra(fields: &[(&'static str, crate::AttrValue)], body: impl
 }
 
 /// The runtime field pairs for the record being emitted on this thread.
+#[cfg(feature = "otel")]
 pub(crate) fn extra() -> Vec<(&'static str, crate::AttrValue)> {
     EXTRA.with(|cell| cell.borrow().clone())
 }

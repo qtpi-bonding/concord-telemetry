@@ -7,10 +7,11 @@ repository.workspace = true
 description = "One init, domain events and coded error records on OpenTelemetry"
 
 [features]
-default = ["reqwest-blocking-client"]
-reqwest-blocking-client = ["opentelemetry-otlp/reqwest-blocking-client"]
-tls = ["reqwest-blocking-client", "opentelemetry-otlp/reqwest-rustls"]
-testing = ["opentelemetry_sdk/testing"]
+default = ["otel"]
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-appender-tracing", "dep:tracing-opentelemetry", "opentelemetry-otlp/reqwest-blocking-client"]
+tls = ["otel", "opentelemetry-otlp/reqwest-rustls"]
+testing = ["otel", "opentelemetry_sdk/testing"]
+grpc-status = ["grpc", "coded-error/grpc"]
 grpc = ["dep:http", "dep:tower-layer", "dep:tower-service"]
 channel = ["dep:tokio"]
 http-server = ["dep:http", "dep:tower", "dep:tower-layer", "dep:tower-service", "dep:pin-project-lite"]
@@ -21,11 +22,11 @@ concord-telemetry-derive = { path = "../concord-telemetry-derive", version = "0.
 coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "ffeaf3949230a8883b56c75e7031346a4f28ed4d", features = ["anyhow"] }
 anyhow = "1"
 concord-fields = { path = "../concord-fields", version = "0.1.0" }
-opentelemetry = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
-opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["logs", "trace"] }
-opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["http-proto", "logs", "trace"] }
-opentelemetry-appender-tracing = { version = "=0.33.1" }
-tracing-opentelemetry = { version = "=0.34.0", default-features = false }
+opentelemetry = { version = "=0.33.1", default-features = false, features = ["logs", "trace"], optional = true }
+opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["logs", "trace"], optional = true }
+opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["http-proto", "logs", "trace"], optional = true }
+opentelemetry-appender-tracing = { version = "=0.33.1", optional = true }
+tracing-opentelemetry = { version = "=0.34.0", default-features = false, optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 prost = "0.13"

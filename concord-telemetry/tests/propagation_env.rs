@@ -1,3 +1,4 @@
+#![cfg(feature = "testing")]
 // Its own binary: it sets TRACEPARENT, which other tests' threads would race.
 use concord_telemetry::propagation::{set_parent_from_env, TRACEPARENT_ENV};
 use concord_telemetry::testing::capture;

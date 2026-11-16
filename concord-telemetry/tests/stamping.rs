@@ -1,5 +1,6 @@
 //! How much work the baggage layer does. The end-of-span collapse hides
 //! repeated writes, so these count them.
+#![cfg(feature = "testing")]
 
 use concord_telemetry::context;
 use concord_telemetry::testing::{capture_exclusive, span_attr, spans, stamp_count};

@@ -1,4 +1,5 @@
 #![cfg(feature = "channel")]
+#![cfg(feature = "testing")]
 
 use concord_telemetry::carrier;
 use concord_telemetry::channel::{spawn_traced, traced};

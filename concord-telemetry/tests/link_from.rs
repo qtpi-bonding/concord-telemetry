@@ -1,4 +1,5 @@
 //! `link_from` carries span context only; it never touches the span's labels.
+#![cfg(feature = "testing")]
 
 use concord_telemetry::testing::{capture_exclusive, span_attr, spans};
 use concord_telemetry::{carrier, context};

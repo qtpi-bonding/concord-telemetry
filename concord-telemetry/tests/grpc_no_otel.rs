@@ -1,3 +1,4 @@
+#![cfg(feature = "grpc")]
 // Its own binary: no OpenTelemetry layer, as in a process with no exporter.
 use concord_telemetry::grpc::{client, ServerLayer};
 use std::convert::Infallible;

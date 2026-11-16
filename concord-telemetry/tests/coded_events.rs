@@ -1,5 +1,6 @@
 //! The library's own coded records share one shape: code, class,
 //! fingerprint of (code, class, source), source, and their one extra field.
+#![cfg(feature = "testing")]
 
 use coded_error::{fingerprint, ErrorClass};
 use concord_telemetry::carrier;

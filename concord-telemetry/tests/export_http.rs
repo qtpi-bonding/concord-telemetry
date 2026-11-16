@@ -1,3 +1,4 @@
+#![cfg(feature = "otel")]
 use concord_telemetry::{init, Config, LocalOutput, Principal, PrincipalKind, EVENT_TARGET};
 use opentelemetry_proto::tonic::collector::{
     logs::v1::ExportLogsServiceRequest, trace::v1::ExportTraceServiceRequest,

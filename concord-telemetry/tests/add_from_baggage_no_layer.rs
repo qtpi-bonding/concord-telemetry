@@ -1,6 +1,7 @@
 //! Under a subscriber without `BaggageLayer` (`testing::layer()` leaves it
 //! out), `add_from_baggage` does nothing, and a header's drops are not
 //! recorded.
+#![cfg(feature = "testing")]
 
 use concord_telemetry::testing::{self, capture_exclusive};
 use concord_telemetry::{carrier, context, BAGGAGE_DROPPED_CODE};

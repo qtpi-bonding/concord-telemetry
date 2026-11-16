@@ -1,3 +1,4 @@
+#![cfg(feature = "testing")]
 use concord_telemetry::{error, set_error_text, ErrorText};
 use std::io;
 use std::sync::{Arc, Barrier, Mutex};

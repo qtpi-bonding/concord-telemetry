@@ -1,3 +1,4 @@
+#![cfg(feature = "otel")]
 // Its own binary: it calls `init`, which sets the global subscriber. The
 // parent re-runs this test as a child and reads the child's stderr.
 use concord_telemetry::{init, Config, LocalOutput};

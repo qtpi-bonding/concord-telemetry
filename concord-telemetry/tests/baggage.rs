@@ -1,3 +1,4 @@
+#![cfg(feature = "testing")]
 use concord_telemetry::carrier;
 use concord_telemetry::context;
 use concord_telemetry::context::MAX_ENTRIES;

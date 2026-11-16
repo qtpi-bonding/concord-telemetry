@@ -1,3 +1,4 @@
+#![cfg(feature = "testing")]
 use concord_telemetry::carrier;
 use concord_telemetry::context;
 use concord_telemetry::testing::{capture_exclusive, set_otel_active, spans};

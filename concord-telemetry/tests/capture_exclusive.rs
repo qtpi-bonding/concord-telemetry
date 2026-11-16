@@ -1,5 +1,6 @@
 //! Own binary: capture_exclusive only guarantees "exactly the records emitted
 //! while held" when no other test in the process emits events.
+#![cfg(feature = "testing")]
 
 #[allow(dead_code)]
 #[path = "proto/fixtures.rs"]

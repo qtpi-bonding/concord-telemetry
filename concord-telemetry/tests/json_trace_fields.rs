@@ -1,3 +1,4 @@
+#![cfg(feature = "otel")]
 // Its own binary: it calls `init`, which sets the global subscriber.
 use concord_telemetry::{context, init, Config, LocalOutput};
 use std::io::{Read, Write};

@@ -1,5 +1,6 @@
 //! `context::add_from_baggage` adds a header's labels to the current span, like
 //! `context::add` for each entry in header order.
+#![cfg(feature = "testing")]
 
 use concord_telemetry::testing::{
     assert_no_label_conflict, capture_exclusive, span_attr, spans, stamp_count,

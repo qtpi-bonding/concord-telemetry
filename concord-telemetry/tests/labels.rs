@@ -1,5 +1,6 @@
 //! Labels resolve once, when the span ends (design A). Every test holds the
 //! exclusive capture, so the spans it reads are its own.
+#![cfg(feature = "testing")]
 
 use concord_telemetry::testing::{
     assert_no_label_conflict, capture_exclusive, span_attr, spans, spans_in_trace,

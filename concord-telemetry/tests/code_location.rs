@@ -1,4 +1,5 @@
 //! Own binary: exported log records carry the span keys for code location.
+#![cfg(feature = "testing")]
 
 #[allow(dead_code)]
 #[path = "proto/fixtures.rs"]
