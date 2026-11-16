@@ -1,7 +1,7 @@
 # concord-telemetry
 
 One `init`, domain events and coded error records on OpenTelemetry. A repo's
-binaries and its own internal crates (e.g. grorg's `ops`, which emits domain
+binaries and its own internal crates (e.g. an `ops` crate that emits domain
 events after the write) may depend on it. Crates other repos depend on (proto
 and type crates), language-agnostic crates and wasm/Flutter-native crates never
 do. Consumers depend on `concord-telemetry` and `tracing`, never on an
@@ -16,61 +16,42 @@ and the build-script helpers live in the separate
 [`concord-telemetry-proto`](https://github.com/qtpi-bonding/concord-telemetry-proto)
 repo; `concord-telemetry` depends on it and re-exports the types.
 
-## Breaking changes in 0.4.0
+## Features and the off build
 
-- The proto types moved to `concord-telemetry-proto` (its own repo). The crate
-  `concord-telemetry-proto` is no longer in this workspace, so a `[build-dependencies]`
-  entry for it points at the new repo, not this one.
-- `concord_telemetry::proto::v1` is removed. There is one path per type:
-  `concord_telemetry::{Principal, PrincipalKind, Verification, TraceCarrier}` are
-  re-exports of `concord_telemetry_proto`'s, and the generated-code path is
-  `::concord_telemetry_proto::v1` (`concord_telemetry_proto::RUST_EXTERN_PATH`).
-  Change `.extern_path(".concord_telemetry.v1", "::concord_telemetry::proto::v1")`
-  to `.extern_path(".concord_telemetry.v1", concord_telemetry_proto::RUST_EXTERN_PATH)`.
-- The plain `TraceCarrier` (`concord_telemetry_proto::TraceCarrier`, re-exported)
-  and the prost wire message (`concord_telemetry_proto::v1::TraceCarrier`) are
-  still two different types. The `From` impls between them and the `field`
-  helper moved to `concord-telemetry-proto` (`src/v1.rs`), so they are no longer
-  in `concord-telemetry`; the conversions work unchanged where both are in scope.
-- `#[derive(Event)]` accepts a `Principal` field typed
-  `concord_telemetry_proto::v1::Principal` (and, as before, `concord_telemetry::Principal`).
-- `emit_at` is public (`concord_telemetry::emit_at`; it was `__private::emit_at`),
-  and `error_at!` / `error_at_anyhow!` are new public macros built on it.
-  `emit_error_at(file, line, module, &err, &[(&'static str, AttrValue)])` records
-  an error with runtime field names (for a hook that only has them as data).
-- `scripts/concord-lint-for-lock.sh` (new, see "concord-lint"). `concord-lint` now checks `error_at!` / `error_at_anyhow!`, and a local registry can declare wrapper macros with `[lint] log_macros`.
+| Feature | Default | Adds |
+| --- | --- | --- |
+| `otel` | yes | OpenTelemetry export: OTLP exporters, trace ids, span processors, the baggage layer. Without it the whole API still compiles and runs, but nothing is exported and no trace ids exist. |
+| `tls` | no | HTTPS to the collector (reqwest's rustls); implies `otel`. |
+| `testing` | no | The `testing` module; implies `otel`. |
+| `grpc` | no | `grpc::ServerLayer` / `grpc::client` over `http::Request`; no tonic. |
+| `grpc-status` | no | `grpc::reject`, `reject_anyhow`, `reject_anyhow_redacted` (builds tonic `Status` values); implies `grpc`. |
+| `http-server` | no | `http_server::IngressLayer`. |
+| `channel` | no | `channel::traced`, `channel::spawn_traced`. |
+| `lifecycle` | no | `lifecycle::spawn_alive` and `lifecycle::shutdown_signal` (tokio). |
 
-0.4.0 also carries 0.3.1's `context::add_from_baggage`.
+`otel` is a default feature. To build without OpenTelemetry, a consumer sets
+`default-features = false` on its `concord-telemetry` dependency at the
+workspace root (`[workspace.dependencies]`) and adds `features = ["otel"]` on
+each member that exports (binaries that ship telemetry). Members that inherit the
+workspace entry unchanged get the off build. Features unify across a workspace:
+if any crate in the build turns `otel` on, every crate sees it on, and the
+API then behaves as off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set (no
+exporter, no thread, an inert `Guard`). Check the result with
+`scripts/check-has-telemetry.sh` (must pass for an exporting member) and
+`scripts/check-no-telemetry.sh` (must pass for a member that must stay free of
+telemetry); both judge by the package names in `cargo tree -e normal`.
 
-## 0.3.1
-
-Additive: `context::add_from_baggage(header)`, the replacement for the
-adoption `link_from` no longer does (see below).
-
-## Breaking changes in 0.3.0
-
-- `AttrValue::U64` is gone (nothing produced it; the derive records `u64` as strings).
-- `carrier::link_from` no longer adopts the linked span's baggage. Callers that
-  relied on it add the labels they need with `context::add`: multimatrix-ops
-  `src/trace.rs:23` (`resend_span` relies on adoption), `:102`, `:136` and
-  `fleet.rs:72`; multimatrix `src/main.rs:869`; grorg-server `events.rs:252`;
-  gait-acp `trace_meta.rs:32`; gait `trace.rs:244` (the span is never entered,
-  so use `span.in_scope(|| context::add(..))`).
-- `http_server::IngressService`'s future is `ResponseFuture`, and the inner
-  service must return `http::Response<_>`. Its request carries a `ServerSpan`.
-- HTTP server span names change from the request path to the method (`GET`),
-  or `GET /route` once the service calls `ServerSpan::record_route`.
-- Baggage holds at most 24 entries (was 16); `tracestate` is capped at 512
-  characters (was 256) and shortened per W3C instead of dropped.
-- `concord-lint` has two new rules, `label-debug` and `reserved-label-prefix`.
-- `testing::capture_exclusive()` also clears the exported spans.
-- The `concord.` namespace is reserved for baggage keys (`concord.label.` is the
-  stamping prefix, `concord.label_conflicts` is the conflict report).
+With `otel` off: `init` installs the local layer only (`Text`, `Json`,
+`JsonFile`, `Off` all work), `Guard` is empty, `carrier::capture()` returns an
+empty carrier, `parent_on`, `link_from`, `extract_*` and the label readers are
+no-ops, the `grpc` and `http_server` layers still open their spans, and the
+`Event` derive and `error!` macros still write their fields to the local output.
+The `concord_telemetry::__private` re-exports of `opentelemetry` exist only with `otel`.
 
 ## Init
 
 ```rust
-let _guard = concord_telemetry::init(concord_telemetry::Config::new("grorg-server", env!("CARGO_PKG_VERSION")))?;
+let _guard = concord_telemetry::init(concord_telemetry::Config::new("my-service", env!("CARGO_PKG_VERSION")))?;
 ```
 
 Keep the `Guard` for the life of `main`: dropping it flushes (capped by
@@ -91,6 +72,29 @@ Do not call `std::process::exit`: it skips the flush
 Plain HTTP by default with no TLS stack in the tree. HTTPS to the collector is
 behind the optional `tls` feature (reqwest's rustls, aws-lc-rs). TLS is an ops
 concern; prefer a tailnet or a Caddy in front.
+
+### Init failure
+
+`concord_telemetry::report_init_failure(service, &err)` writes one JSON line
+to stderr, for a binary whose `init` failed before any logger exists:
+
+```rust
+let _guard = match concord_telemetry::init(config) {
+    Ok(guard) => guard,
+    Err(err) => {
+        concord_telemetry::report_init_failure("my-service", &err);
+        return std::process::ExitCode::FAILURE;
+    }
+};
+```
+
+The line has exactly the keys `level` (`"error"`), `code`
+(`"telemetry_init_failed"`), `service` and `message`, in that order. `message`
+is the error's text followed by each `source()`, joined with `": "`.
+`init_failure_line(service, &err)` returns the same line without the newline.
+`Config`, `LocalOutput` and `InitError` are `#[non_exhaustive]`: build a
+`Config` with `Config::new` and assign fields, and match `InitError` with a
+`_` arm. `InitError::Exporter` holds a boxed error.
 
 ### Resource attributes
 
@@ -156,7 +160,7 @@ resource attributes `vcs.repository.name` (from `CONCORD_GIT_REPO`) and
 `vcs.ref.head.revision` (from `CONCORD_GIT_SHA`), so telemetry can be joined to
 a code graph on repository, commit, repo-relative `code.file.path` and
 `code.line.number`. `repo!()` alone is the repository name. Both variables are
-read at build time of each binary's own crate (`CONCORD_GIT_REPO=grorg
+read at build time of each binary's own crate (`CONCORD_GIT_REPO=my-repo
 CONCORD_GIT_SHA=$(git rev-parse HEAD) cargo build`); unset or empty, the
 attribute is omitted. `OTEL_RESOURCE_ATTRIBUTES` may override either at run
 time; empty values there are ignored.
@@ -169,6 +173,73 @@ baggage) across Tokio channels and spawned tasks. `TracedSender` also has `try_s
 feature provides `http_server::IngressLayer` for joining W3C HTTP ingress
 headers in an `http.server` span.
 
+## Lifecycle
+
+`concord_telemetry::lifecycle` emits the service lifecycle events, so every
+service reports the same ones. The service name, version and instance id come from
+`init` (the Resource's `service.name`, `service.version`, `service.instance.id`),
+never from a caller. `init` must have succeeded first: before it, each function
+returns `Err(LifecycleError::NotInitialised)` (code `concord.lifecycle.not_initialised`).
+
+| Event type name | Message fields |
+| --- | --- |
+| `concord_telemetry.v1.ServiceStarted` | `source_record_id`, `service`, `version` |
+| `concord_telemetry.v1.ServiceStopping` | `source_record_id`, `service`, `reason` (optional), `uptime_ms` |
+| `concord_telemetry.v1.ServiceAlive` | `source_record_id`, `service`, `uptime_ms` |
+
+`source_record_id` is the instance id (the 16-digit hex `service.instance.id`),
+not the service name. `uptime_ms` counts from `init`. Functions: `started()`,
+`stopping(reason: Option<&str>)`, `spawn_alive(period)` (feature `lifecycle`; a
+heartbeat until the returned `Alive` is dropped, first tick after one period) and
+`shutdown_signal().await` (feature `lifecycle`; waits for ctrl-c or SIGTERM,
+emits `stopping(Some("ctrl_c"))` or `stopping(Some("sigterm"))` once and returns).
+`started` and `stopping` are `#[track_caller]`: the record's `code.*` location is the call site.
+
+A smoke check ("golden loop") that a service came up looks for a
+`concord_telemetry.v1.ServiceStarted` record whose `service` is the expected
+service, whose `version` is the expected build, and whose `source_record_id`
+is non-empty (an instance id, one per process start); a `ServiceAlive` stream
+with the same `source_record_id` shows it is still running.
+
+## gRPC status
+
+With `grpc-status` (adds tonic, no TLS): `grpc::reject(method, err)` (a
+`CodedError`), `grpc::reject_anyhow(method, &err)` and
+`grpc::reject_anyhow_redacted(method, &err, fixed_message)` record the error with
+the `rpc.method` field at the caller's code location and return a `tonic::Status`
+whose code follows the error class (`reject_anyhow_redacted` puts
+`fixed_message` in the status and keeps the chain in the record only). The crate's
+`grpc` feature alone stays tonic-free.
+
+## Labels
+
+Labels are the baggage entries that travel with a trace (the fields marked
+`label = true` in `fields.toml`: `action_id`, `agent_id`, `delivery_id`,
+`instance_id`, `machine_id`, `message_id`, `request_id`, `session_id`,
+`turn_id`; `concord_fields::label_names()` lists them). Helpers, all public:
+
+- `labels::parse(header)` and `labels::format(entries)`: pure, percent-decoding,
+  caps applied (24 entries, keys 64 bytes, values 256 bytes, header 8192 bytes),
+  properties dropped, invalid entries skipped. They work with `otel` off.
+- `labels::of(span, key)`, `labels::add_once(span, key, value)` (no-op when the
+  label is present or the value empty) and `labels::record_once(span, field, value)`
+  (a `span.record` unless the label exists). No-ops with `otel` off or no exporter.
+- `carrier::with_label(&carrier, key, value)` (replace or append; an invalid
+  label leaves the carrier as it was and records `concord.trace.baggage_dropped`),
+  `carrier::without_label(&carrier, key)`, and
+  `carrier::parent_on_or_env(span, Option<&carrier>)` (a carrier with a
+  `traceparent` wins, else `TRACEPARENT` / `BAGGAGE` from the environment).
+- `concord_telemetry::clip(value)` cuts a value to `concord_fields::FREE_TEXT_MAX`
+  (1024) bytes on a character boundary, for a free-text field.
+
+### Session ids
+
+Three names, three meanings: `session_id` (a label: the Session the work belongs
+to), `target_session_id` (the Session an operation is about, when that differs
+from the `session_id` label) and `acp_session_id` (the id held with an ACP agent,
+apart from the upstream session id). A name that belongs to one application
+stays in that application's `fields.local.toml`.
+
 ## Events
 
 ```rust
@@ -180,8 +251,8 @@ line first and helper second, with `message_attribute` (never `type_attribute`,
 which also reaches enums and oneofs):
 
 ```rust
-.message_attribute(".grorg.events", "#[derive(::concord_telemetry::Event)]")
-.message_attribute(".grorg.events", "#[concord_event(package = \"grorg.events.v1\")]")
+.message_attribute(".app.events", "#[derive(::concord_telemetry::Event)]")
+.message_attribute(".app.events", "#[concord_event(package = \"app.events.v1\")]")
 .extern_path(".concord_telemetry.v1", concord_telemetry_proto::RUST_EXTERN_PATH)
 ```
 
@@ -343,8 +414,23 @@ them with `spans_in_trace(&span)`. `span_attr(&span, key)` panics when a span
 exports a key twice, and `assert_no_label_conflict(&spans)` fails on any
 `concord.label_conflicts`. Spans reach the store through `LabelCollapse`, so a
 test sees what the collector sees. If your tests already install a global subscriber, add
-`testing::layer()` to it and read with `testing::reader()`. Both paths were
-confirmed against grorg (tonic server tests) and structmux (daemon tests).
+`testing::layer()` to it and read with `testing::reader()`. Both paths are
+covered by tests (a tonic server and a daemon).
+
+### Testing helpers
+
+`testing::check_attributes(&registry, span_name, &pairs)` panics on a repeated
+key (naming the span, the key and both values), on a key that is neither
+registered nor written by the tracing layer (`target`, `level`, `busy_ns`,
+`idle_ns` and the prefixes `otel.`, `code.`, `thread.`), and on a `free_text`
+field over `FREE_TEXT_MAX`. `testing::spans_checked(&registry, prefix)` returns
+the exported spans whose name starts with `prefix`, after running that check
+on each. Build the registry with `concord_fields::Registry::shared()` plus
+`.with_local(src)` for a local overlay; `testing::{Registry, label_names}` are
+re-exported. `testing::trace_env(traceparent, baggage)` sets (or, for `None`,
+removes) `TRACEPARENT` and `BAGGAGE`, holds a process-wide lock and restores
+the previous values when the guard drops, including on panic;
+`testing::with_trace_env(tp, bg, || ..)` is the closure form.
 
 ## concord-lint
 
@@ -406,16 +492,38 @@ The lint tool reports `ratchet.result_string`, `ratchet.dropped_result`,
 These findings use the same counting baseline mechanism as the existing rules;
 test files and `#[cfg(test)]` modules are skipped.
 
-## Checks
+## Checks and scripts
 
-`scripts/check-otel-dependents.sh [-p PACKAGE] ALLOWED_CRATE...` is reusable in
-your own workspace: it fails if any crate outside the OpenTelemetry family and
-the crates you name (normally `concord-telemetry`) depends directly on
-`opentelemetry`, using `cargo tree -e normal -i opentelemetry --depth 1`. Without
-`-p` it checks the whole workspace. It runs cargo through `$CARGO_SLOT` when set.
-Copy it or call it from a pinned checkout; do not rewrite it in your check script.
+- `scripts/check.sh` is the whole gate, every cargo call through the compile
+  slot (`$CARGO_SLOT`, else `cargo-slot` on PATH, else cargo): fmt; clippy with
+  `-D warnings` for the workspace with all features and for the off build; tests
+  for the workspace, the off build, `grpc,channel,http-server` and
+  `lifecycle,grpc-status`; the off-build check; the telemetry-in-the-tree gates;
+  the opentelemetry dependents allowlist; no tonic with `grpc`, tonic with
+  `grpc-status`, no rustls in the default tree; the script tests; and the
+  self-lint over `concord-telemetry/src concord-lint/src concord-fields/src`
+  with `--baseline lint-baseline.txt` (the baseline may only shrink).
+- `scripts/check-has-telemetry.sh [-p PKG]...` fails unless the exact package
+  `opentelemetry` is in each package's normal tree.
+- `scripts/check-no-telemetry.sh [-p PKG]... [--features F] [--also NAME]...`
+  fails when `concord-telemetry`, `concord-telemetry-derive`,
+  `tracing-opentelemetry`, any `opentelemetry*` package or an `--also` name is in
+  the normal tree. Both decide by the package names in `cargo tree -e normal`,
+  not by exit status: current cargo exits 0 and prints "nothing to print" for
+  `cargo tree -i <absent package>`.
+- `scripts/check-otel-dependents.sh [-C DIR] [-p PACKAGE] ALLOWED_CRATE...` fails
+  if any crate outside the OpenTelemetry family and the crates you name
+  (normally `concord-telemetry`) depends directly on `opentelemetry`; without
+  `-p` it checks the whole workspace.
+- `scripts/concord-lint-for-lock.sh [--path] Cargo.lock` prints the pinned rev,
+  or with `--path` the installed binary's path.
 
-`scripts/check.sh` (through the compile slots): fmt, clippy, tests, the lock-script test, the
-no-default-features build, the opentelemetry dependents allowlist (`scripts/check-otel-dependents.sh`), no tonic, no
-rustls in the default tree, and the lint on this repo. `collector/otel-collector.yaml`
+Consumers call these from the checkout cargo made for their pin; find it with:
+
+```sh
+cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="concord-telemetry") | .manifest_path | sub("/concord-telemetry/Cargo.toml$"; "")'
+```
+
+and run `<that dir>/scripts/check-has-telemetry.sh -p <member>` and so on.
+Do not rewrite them in your own check script. `collector/otel-collector.yaml`
 is an example collector config for the end-to-end stack.
