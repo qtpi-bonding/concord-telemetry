@@ -1,4 +1,4 @@
-error: field `count` is int in the shared registry; proto field is emitted as string (repeated and 64-bit unsigned fields are emitted as strings)
+error: field `count` is int in the shared registry; proto field is emitted as string (repeated fields are emitted as strings)
  --> tests/ui/type_mismatch_repeated.rs:8:5
   |
 8 | /     #[prost(int64, repeated, tag = "2")]

@@ -238,10 +238,11 @@ fn expand(input: &DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
         }
         // A name in the shared registry fixes the type of the *emitted* value;
         // local names are not visible here and are checked by the linter.
-        // Repeated fields are emitted as a JSON string and uint64/fixed64 as
-        // a decimal string, so those are string-typed whatever the proto kind.
+        // Every integer proto type (including uint64/fixed64) counts as `int`.
+        // Only repeated fields are emitted as a JSON string, so only
+        // `is_repeated(&field.ty)` makes the effective type `Str`.
         // `source_record_id` has its own, more specific diagnostic below.
-        let coerced = kind_type(kind).is_some() && (is_repeated(&field.ty) || kind == Kind::U64);
+        let coerced = kind_type(kind).is_some() && is_repeated(&field.ty);
         let emitted = if coerced {
             Some(concord_fields::FieldType::Str)
         } else {
@@ -255,7 +256,7 @@ fn expand(input: &DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
             if def.ty != actual {
                 let found = if coerced {
                     format!(
-                        "emitted as {} (repeated and 64-bit unsigned fields are emitted as strings)",
+                        "emitted as {} (repeated fields are emitted as strings)",
                         type_word(actual)
                     )
                 } else if kind == Kind::Enum {

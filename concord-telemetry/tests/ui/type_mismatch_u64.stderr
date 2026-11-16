@@ -1,6 +1,0 @@
-error: field `count` is int in the shared registry; proto field is emitted as string (repeated and 64-bit unsigned fields are emitted as strings)
- --> tests/ui/type_mismatch_u64.rs:8:5
-  |
-8 | /     #[prost(uint64, tag = "2")]
-9 | |     count: u64,
-  | |______________^
