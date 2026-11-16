@@ -236,24 +236,38 @@ fn expand(input: &DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
                 "bytes/map/oneof content stays in the source record",
             ));
         }
-        // A name in the shared registry fixes the type; local names are not
-        // visible here and are checked by the linter. `source_record_id` has
-        // its own, more specific diagnostic below.
+        // A name in the shared registry fixes the type of the *emitted* value;
+        // local names are not visible here and are checked by the linter.
+        // Repeated fields are emitted as a JSON string and uint64/fixed64 as
+        // a decimal string, so those are string-typed whatever the proto kind.
+        // `source_record_id` has its own, more specific diagnostic below.
+        let coerced = kind_type(kind).is_some() && (is_repeated(&field.ty) || kind == Kind::U64);
+        let emitted = if coerced {
+            Some(concord_fields::FieldType::Str)
+        } else {
+            kind_type(kind)
+        };
         if let (Some(def), Some(actual), true) = (
             shared.names.get(&fname),
-            kind_type(kind),
+            emitted,
             fname != "source_record_id",
         ) {
             if def.ty != actual {
+                let found = if coerced {
+                    format!(
+                        "emitted as {} (repeated and 64-bit unsigned fields are emitted as strings)",
+                        type_word(actual)
+                    )
+                } else if kind == Kind::Enum {
+                    "enum".to_string()
+                } else {
+                    type_word(actual).to_string()
+                };
                 return Err(Error::new_spanned(
                     field,
                     format!(
-                        "field `{fname}` is {} in the shared registry; proto field is {}",
-                        type_word(def.ty),
-                        match kind {
-                            Kind::Enum => "enum",
-                            _ => type_word(actual),
-                        }
+                        "field `{fname}` is {} in the shared registry; proto field is {found}",
+                        type_word(def.ty)
                     ),
                 ));
             }
