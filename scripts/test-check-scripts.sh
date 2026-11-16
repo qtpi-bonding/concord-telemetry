@@ -21,7 +21,12 @@ case "$*" in
         echo "warning: nothing to print." >&2; exit 0
       fi
     done
-    cat "$STUB_TREE" ;;
+    # A separate tree for --no-default-features lets a test model a package that pulls
+    # telemetry only under its default features.
+    case "$*" in
+      *"--no-default-features"*) if [ -s "${STUB_TREE}.nodefault" ]; then cat "${STUB_TREE}.nodefault"; else cat "$STUB_TREE"; fi ;;
+      *) cat "$STUB_TREE" ;;
+    esac ;;
   *"cargo install"*)
     root=""; while [ $# -gt 0 ]; do [ "$1" = "--root" ] && root="$2"; shift; done
     mkdir -p "$root/bin"; : > "$root/bin/concord-lint"; chmod +x "$root/bin/concord-lint" ;;
@@ -43,6 +48,7 @@ app v0.1.0 (/work/app)
     └── tracing-core v0.1.32
 T
 }
+clean_tree_to() { local keep="$STUB_TREE"; STUB_TREE="$1"; clean_tree; STUB_TREE="$keep"; }
 tree_with() { clean_tree; printf '└── %s v0.1.0\n' "$@" >> "$STUB_TREE"; }
 
 REV=0123456789abcdef0123456789abcdef01234567
@@ -96,6 +102,16 @@ no_telemetry_fails_on_opentelemetry_sdk() {
   done
 }
 
+no_telemetry_no_default_features_selects_the_off_tree() {
+  tree_with concord-telemetry
+  clean_tree_to "$STUB_TREE.nodefault"
+  "$here/check-no-telemetry.sh" -p app --no-default-features || fail "off tree rejected with --no-default-features"
+  grep -q -- "--no-default-features" "$STUB_LOG" || fail "--no-default-features not passed to cargo tree"
+  if "$here/check-no-telemetry.sh" -p app 2>"$work/err"; then fail "default-feature tree accepted without the flag"; fi
+  grep -q concord-telemetry "$work/err" || fail "offender not printed"
+  rm -f "$STUB_TREE.nodefault"
+}
+
 no_telemetry_also_catches_extra_name() {
   tree_with tonic
   "$here/check-no-telemetry.sh" || fail "tonic rejected without --also"
@@ -147,7 +163,7 @@ no_bare_array_expansions() {
 
 for t in path_flag_prints_binary_path no_flag_prints_rev lock_sh_sourced_runs_nothing \
   no_telemetry_passes_on_clean_tree no_telemetry_fails_on_opentelemetry_sdk \
-  no_telemetry_also_catches_extra_name has_telemetry_passes_and_fails \
+  no_telemetry_no_default_features_selects_the_off_tree no_telemetry_also_catches_extra_name has_telemetry_passes_and_fails \
   no_optional_args_runs_under_nounset otel_dependents_dash_c_passes_manifest_path no_bare_array_expansions; do
   : > "$STUB_LOG"; : > "$STUB_LOG.cwd"; rm -rf "$HOME/.cache"
   "$t"; echo "ok $t"

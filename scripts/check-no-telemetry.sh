@@ -2,22 +2,26 @@
 # Fails if the normal (non-dev, non-build) dependency tree contains telemetry:
 # concord-telemetry, concord-telemetry-derive, tracing-opentelemetry, any
 # opentelemetry* package, or any extra --also NAME.
-#   check-no-telemetry.sh [-p PACKAGE]... [--features F] [--also NAME]...
+#   check-no-telemetry.sh [-p PACKAGE]... [--features F] [--no-default-features] [--also NAME]...
+# --no-default-features is passed to cargo tree: the off build of a package whose own
+# default feature set turns telemetry on.
 # -p limits the tree to the named workspace members (default: --workspace).
 # Cargo runs through $CARGO_SLOT if set, else `cargo-slot` on PATH if present,
 # else directly. The verdict comes from the package names in the tree, not from
 # cargo's exit status (`cargo tree -i` of an absent package exits 0).
 set -euo pipefail
 
-usage() { echo "usage: $0 [-p PACKAGE]... [--features F] [--also NAME]..." >&2; exit 2; }
+usage() { echo "usage: $0 [-p PACKAGE]... [--features F] [--no-default-features] [--also NAME]..." >&2; exit 2; }
 
 pkgs=()
 features=()
+nodefault=()
 also=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -p) [ $# -ge 2 ] || usage; pkgs+=(-p "$2"); shift 2 ;;
     --features) [ $# -ge 2 ] || usage; features=(--features "$2"); shift 2 ;;
+    --no-default-features) nodefault=(--no-default-features); shift ;;
     --also) [ $# -ge 2 ] || usage; also+=("$2"); shift 2 ;;
     *) usage ;;
   esac
@@ -26,7 +30,7 @@ done
 
 SLOT="${CARGO_SLOT-$(command -v cargo-slot || true)}"
 
-tree="$($SLOT cargo tree ${pkgs[@]+"${pkgs[@]}"} ${features[@]+"${features[@]}"} -e normal)" \
+tree="$($SLOT cargo tree ${pkgs[@]+"${pkgs[@]}"} ${features[@]+"${features[@]}"} ${nodefault[@]+"${nodefault[@]}"} -e normal)" \
   || { echo "cargo tree failed" >&2; exit 1; }
 names="$(printf '%s\n' "$tree" | grep -oE '[A-Za-z0-9_-]+ v[0-9]' | awk '{print $1}' | sort -u)"
 

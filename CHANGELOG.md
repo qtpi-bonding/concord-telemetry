@@ -7,6 +7,12 @@ concord-lint 0.2.0. Pin all four at the same revision.
 
 ### Added
 
+- `testing::capture` / `capture_exclusive` export each span with its tracing level
+  as the `level` attribute (`"INFO"`, `"DEBUG"`, ...), so consumers can assert span
+  levels with `span_attr(span, "level")`.
+- `scripts/check-no-telemetry.sh --no-default-features`: passed to `cargo tree`, so
+  a package whose own default features turn telemetry on can be checked in its off
+  build (`-p crate --no-default-features`).
 - Feature `otel` (default). Without it the API is the same and nothing is
   exported; see "Features and the off build" in the README.
 - `report_init_failure(service, &err)` and `init_failure_line(service, &err)`
