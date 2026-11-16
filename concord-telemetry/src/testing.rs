@@ -391,8 +391,16 @@ fn string_attr(attrs: &Attrs, name: &str) -> Option<String> {
     }
 }
 
-/// Keys the tracing layers write on every span, outside the registry.
-const LAYER_KEYS: &[&str] = &["target", "level", "busy_ns", "idle_ns"];
+/// Keys the tracing layers and the library's own gRPC and HTTP server spans write, outside the registry.
+const LAYER_KEYS: &[&str] = &[
+    "target",
+    "level",
+    "busy_ns",
+    "idle_ns",
+    "rpc.system",
+    "http.route",
+    "http.response.status_code",
+];
 const LAYER_PREFIXES: &[&str] = &["otel.", "code.", "thread."];
 
 fn library_owned(registry: &Registry, key: &str) -> bool {

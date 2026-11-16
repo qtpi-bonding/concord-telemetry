@@ -166,3 +166,16 @@ async fn grpc_server_is_silent_on_empty_carrier() {
     set_otel_active(false);
     assert!(captured.errors_where(|_| true).is_empty());
 }
+
+#[tokio::test]
+async fn a_grpc_server_span_passes_the_attribute_gate() {
+    use concord_telemetry::testing::{span_attr, spans_checked};
+    let _captured = capture_exclusive();
+    served("grpc-joined", request(Some(PARENT))).await;
+    let found = spans_checked(&concord_telemetry::testing::Registry::shared(), "");
+    let server = found
+        .iter()
+        .find(|s| span_attr(s, "rpc.system").is_some())
+        .expect("a grpc.server span with rpc.system");
+    assert_eq!(span_attr(server, "rpc.system").as_deref(), Some("grpc"));
+}

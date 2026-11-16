@@ -171,3 +171,29 @@ fn dropping_the_response_future_drops_the_inner_future_inside_the_span() {
     drop(future);
     assert_eq!(seen.lock().unwrap().as_deref(), Some("http.server"));
 }
+
+#[tokio::test]
+async fn an_http_server_span_passes_the_attribute_gate() {
+    let _captured = capture_exclusive();
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("/items/42")
+        .body(())
+        .expect("request");
+    serve_with(request, |request| {
+        request
+            .extensions()
+            .get::<ServerSpan>()
+            .expect("the ingress layer provides the span")
+            .record_route("/items/{id}");
+        response(201)
+    })
+    .await;
+    let found = concord_telemetry::testing::spans_checked(
+        &concord_telemetry::testing::Registry::shared(),
+        "",
+    );
+    assert!(found.iter().any(|s| {
+        span_attr(s, "http.route").is_some() && span_attr(s, "http.response.status_code").is_some()
+    }));
+}
