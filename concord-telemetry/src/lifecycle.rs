@@ -20,7 +20,7 @@ static IDENTITY: OnceLock<Identity> = OnceLock::new();
 
 pub(crate) fn set_identity(identity: Identity) {
     // `init` succeeds once per process, so this is the only writer.
-    let _ = IDENTITY.set(identity);
+    IDENTITY.get_or_init(|| identity);
 }
 
 fn identity() -> Result<&'static Identity, LifecycleError> {
@@ -125,7 +125,8 @@ impl Drop for Alive {
 #[cfg(feature = "lifecycle")]
 pub fn spawn_alive(period: std::time::Duration) -> Result<Alive, LifecycleError> {
     let identity = identity()?;
-    let handle = tokio::spawn(async move {
+    // The heartbeat belongs to the process, not to whatever span is current here.
+    let heartbeat = async move {
         let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         loop {
             ticks.tick().await;
@@ -135,7 +136,11 @@ pub fn spawn_alive(period: std::time::Duration) -> Result<Alive, LifecycleError>
                 uptime_ms: uptime_ms(identity),
             });
         }
-    });
+    };
+    let handle = tokio::spawn(tracing::Instrument::instrument(
+        heartbeat,
+        tracing::Span::none(),
+    ));
     Ok(Alive(handle))
 }
 
@@ -159,7 +164,9 @@ pub async fn shutdown_signal() {
     let reason = tokio::signal::ctrl_c().await.map(|()| "ctrl_c");
     match reason {
         Ok(reason) => {
-            let _ = stopping(Some(reason));
+            if let Err(error) = stopping(Some(reason)) {
+                tracing::warn!(%error, "stopping event not emitted");
+            }
         }
         Err(error) => {
             tracing::warn!(%error, "waiting for a shutdown signal failed");
