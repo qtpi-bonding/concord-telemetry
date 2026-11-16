@@ -15,6 +15,7 @@ fn writes_json_records_to_file_and_not_stdout() {
         );
         let guard = init(config).expect("child init");
         tracing::info!(action_id = "a1", "sent");
+        #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
         drop(guard);
         return;
     }
@@ -25,6 +26,7 @@ fn writes_json_records_to_file_and_not_stdout() {
     config.local = LocalOutput::JsonFile(path.clone());
     let guard = init(config).expect("init");
     tracing::info!(action_id = "a1", "sent");
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
     let content = std::fs::read_to_string(&path).expect("read json");
     assert!(content

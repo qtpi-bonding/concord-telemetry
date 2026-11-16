@@ -17,6 +17,7 @@ fn a_refused_enabled_check_does_not_drop_the_next_record() {
     tracing::info!(target: "application", "after a refused check");
     assert!(!tracing::enabled!(target: "sqlx::query", tracing::Level::DEBUG));
     tracing::event!(name: "event-after-check", target: EVENT_TARGET, tracing::Level::INFO, marker = "kept");
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
     let output = std::fs::read_to_string(&file).expect("json output");
     assert!(

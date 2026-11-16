@@ -37,5 +37,6 @@ fn retried_init_installs_one_hook() {
             "the previous hook runs once per panic"
         );
     }
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
 }

@@ -10,6 +10,7 @@ static LOG: OnceLock<PathBuf> = OnceLock::new();
 fn log() -> &'static PathBuf {
     LOG.get_or_init(|| {
         let (guard, path) = init_json("svc", "1.2.3");
+        #[allow(clippy::forget_non_drop)] // Guard has no Drop without `otel`
         std::mem::forget(guard);
         path
     })

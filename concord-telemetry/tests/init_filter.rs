@@ -16,6 +16,7 @@ fn events_remain_enabled_when_rust_log_is_error() {
         "gRPC trace spans survive RUST_LOG=error"
     );
     tracing::event!(name: "visible", target: EVENT_TARGET, tracing::Level::INFO, marker = "yes");
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
     let output = std::fs::read_to_string(&file).expect("json output");
     assert!(output.contains("\"marker\":\"yes\""));

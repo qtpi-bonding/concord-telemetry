@@ -21,6 +21,7 @@ fn refused_endpoint_does_not_block_shutdown_or_panic_hook() {
     assert!(result.is_err());
     assert!(started.elapsed() < Duration::from_secs(3));
     let started = Instant::now();
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
     assert!(started.elapsed() < Duration::from_secs(3));
 }

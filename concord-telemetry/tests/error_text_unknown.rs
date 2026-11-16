@@ -11,6 +11,7 @@ fn unknown_concord_error_text_warns_once_and_means_full() {
     config.local = LocalOutput::JsonFile(path.clone());
     let guard = concord_telemetry::init(config).expect("init");
     assert_eq!(error_text(), ErrorText::Full);
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
     let content = std::fs::read_to_string(&path).expect("read json log");
     let _ = std::fs::remove_file(&path);

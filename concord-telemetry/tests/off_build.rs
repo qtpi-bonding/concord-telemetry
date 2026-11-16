@@ -61,6 +61,7 @@ fn guard_drop_is_noop() {
     log_path();
     let guard = GUARD.lock().unwrap().take();
     let started = Instant::now();
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
     assert!(started.elapsed() < Duration::from_millis(200));
 }

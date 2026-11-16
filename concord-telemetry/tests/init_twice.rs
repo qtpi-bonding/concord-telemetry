@@ -20,5 +20,6 @@ fn second_initialization_is_refused() {
         Err(other) => panic!("unexpected initialization error: {other}"),
         Ok(_) => panic!("second initialization unexpectedly succeeded"),
     }
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
 }
