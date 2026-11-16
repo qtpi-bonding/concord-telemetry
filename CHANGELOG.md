@@ -12,12 +12,17 @@ concord-lint 0.2.0. Pin all four at the same revision.
 - `report_init_failure(service, &err)` and `init_failure_line(service, &err)`
   (every build). Published keys, in this order:
   `{"level":"error","code":"telemetry_init_failed","service":"<service>","message":"<error: source: source>"}`.
-  They replace a per-application init-failure line. Old per-application key
-  names a log search or monitor may still match are `error`, `detail` and
-  `event`: `error` and `detail` (the error text) are now `message`, `event`
-  (the failure's name) is now `code`, whose value is the fixed
-  `telemetry_init_failed`, and `service` and `level` are new keys.
-  Search logs and monitors for the old keys and move them to the new ones.
+  They replace a per-application init-failure line. Three old shapes map to
+  the new one (search logs and monitors for the old keys):
+  - `{service, error:"telemetry_init_failed", detail:<text>}`: `error` held the
+    code, `detail` the text. Now `code` is `telemetry_init_failed` and
+    `message` is the text.
+  - `{level, event:"telemetry.init_failed", service, error:<text>}`: `event`
+    held the code (with a dot), `error` the text. Now `code` is
+    `telemetry_init_failed` (no dot) and `message` is the text.
+  - `{code:"<prefix>.telemetry.init_failed", ...}`: a prefixed code value.
+    Now `code` is the bare `telemetry_init_failed`.
+  `level` and `service` are always present.
 - `lifecycle` module (events registered in `fields.toml`):
   `concord_telemetry.v1.ServiceStarted` (`source_record_id`, `service`,
   `version`), `concord_telemetry.v1.ServiceStopping` (`source_record_id`,
@@ -49,7 +54,12 @@ concord-lint 0.2.0. Pin all four at the same revision.
 - `scripts/check-has-telemetry.sh`, `scripts/check-no-telemetry.sh`,
   `scripts/check-otel-dependents.sh -C DIR`, `scripts/concord-lint-for-lock.sh --path`;
   `scripts/check.sh` is the full gate.
-- The `Event` derive checks a field's kind against its registered type.
+- The `Event` derive checks a field's kind against its registered type. Rule:
+  every integer proto type (int32, int64, uint32, uint64, sint, fixed, sfixed)
+  is `int`; string and enum are `str`; float and double are `float`; bool is
+  `bool`. A `repeated` field is emitted as a string, so it is accepted only on
+  a `str` name and rejected on an `int` name. Messages such as `Timestamp`,
+  `Duration` and `Principal` are not checked.
 
 ### Breaking changes
 
@@ -70,6 +80,19 @@ concord-lint 0.2.0. Pin all four at the same revision.
   (and `ServiceStopping`, `ServiceAlive`); a message defined by a consumer under
   its own package is not the same event.
 - A baggage value is capped at 256 bytes (a consumer comment of 128 is wrong).
+- Baggage encoding is W3C-strict: keys are percent-encoded outside the token
+  set, values outside the baggage-octet set, and `%` and `=` in values are
+  escaped (the old propagator did not escape `%`). Decoding stays lenient, so
+  re-pinned peers interoperate; a test or monitor that asserts an exact header
+  string with such characters changes.
+- `carrier::with_label` and `without_label` fail closed. On a dirty (malformed
+  or reserved entries) or over-8192-byte baggage they drop the baggage (the
+  traceparent is kept) and emit `concord.trace.baggage_dropped`;
+  `without_label` never lets the removed label through, and `with_label`
+  forwards only the new label if it is valid.
+- `grpc::reject*` records use one module (`concord_telemetry::grpc`) as the
+  fingerprint source, so equal codes from different handlers share a
+  fingerprint; `rpc.method` and the file:line tell them apart.
 - `skipped` is a bool in the shared registry; the integer is `skipped_count`.
 
 ### Consumer impact
@@ -81,6 +104,8 @@ Every consumer:
 - Delete every `fields.local.toml` entry that is now shared; every remaining
   local entry needs a `type`.
 - Replace the local init-failure line with `report_init_failure`.
+- A consumer whose count field reuses the shared bool name `ok` renames it
+  (a count is not `ok`; use a `count`-style name).
 - Replace `Config { .. }` literals with `Config::new(..)` plus field assignment;
   add a `_` arm to matches on `LocalOutput` and `InitError`.
 - Use `otel` instead of `reqwest-blocking-client`.
@@ -132,7 +157,7 @@ application, so see the pins of your own repo):
   `check-otel-dependents` call sites, monitor rules and smoke checks (the new
   event type, `source_record_id`, `service`, `version`) in the same change as the
   consumers' re-pin, and grep logs and monitors for the old init-failure keys
-  (`error`, `detail`, `event`).
+  (the three old shapes listed under `report_init_failure`).
 - A consumer that does not use `concord-telemetry` (or depends on it only for
   proto types): nothing changes.
 
