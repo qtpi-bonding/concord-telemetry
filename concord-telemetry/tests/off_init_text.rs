@@ -12,6 +12,7 @@ fn text_writes_a_local_line() {
         config.local = LocalOutput::Text;
         let guard = init(config).expect("child init");
         tracing::info!(target: "application", "off-text-marker");
+        #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
         drop(guard);
         return;
     }

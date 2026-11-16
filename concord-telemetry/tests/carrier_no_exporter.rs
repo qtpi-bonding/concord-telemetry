@@ -18,6 +18,7 @@ fn no_exporter_means_no_trace_missing() {
         assert!(carrier::capture().is_empty());
     });
     tracing::info!(action_id = "a1", "local still works");
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
 
     let content = std::fs::read_to_string(&path).expect("read json");

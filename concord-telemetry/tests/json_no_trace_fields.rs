@@ -15,6 +15,7 @@ fn json_line_without_exporter_has_no_trace_fields() {
         tracing::info!(marker = "m", "inside");
     });
     drop(span);
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
 
     let content = std::fs::read_to_string(&path).expect("read json");

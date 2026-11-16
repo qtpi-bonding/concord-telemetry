@@ -22,6 +22,7 @@ fn run_child(local: LocalOutput) {
     config.local = local;
     let guard = init(config).expect("child init");
     tracing::info!(target: "application", "off-json-marker");
+    #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`
     drop(guard);
 }
 

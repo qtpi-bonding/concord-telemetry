@@ -9,7 +9,7 @@ fn config_is_clone_debug_eq() {
 
 #[test]
 fn exporter_error_keeps_its_source() {
-    let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+    let io_err = std::io::Error::other("boom");
     let e = InitError::Exporter(Box::new(io_err));
     assert!(std::error::Error::source(&e).is_some());
 }
