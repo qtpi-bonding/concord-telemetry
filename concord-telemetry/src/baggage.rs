@@ -1,8 +1,8 @@
 //! Baggage: labels that travel with a trace, kept in span extensions.
 //!
 //! Baggage is labels only, never authorization or routing. The caps are
-//! [`MAX_ENTRIES`] (24) entries, `MAX_KEY` (64) bytes a key, `MAX_VALUE` (256)
-//! bytes a value and `MAX_HEADER` (8192) bytes for the whole header. An
+//! [`MAX_ENTRIES`] (24) entries, 64 bytes a key, 256 bytes a value (`labels`)
+//! and 8192 bytes for the whole header (`labels` parses and formats it). An
 //! invalid entry is dropped and recorded once per header. The whole
 //! `concord.` namespace is reserved: `context::add` refuses it and an incoming
 //! header's entries in it are dropped.
@@ -35,12 +35,7 @@
 //! runs (`Layered::enter` calls the inner subscriber first), so
 //! `Span::current()` is the entered span there.
 
-use crate::propagation::{Carrier, Fields};
-use opentelemetry::baggage::BaggageExt;
-use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::{Context, Key, Value};
-use opentelemetry_sdk::propagation::BaggagePropagator;
-use std::collections::HashMap;
+use opentelemetry::{Key, Value};
 use std::sync::Arc;
 #[cfg(feature = "testing")]
 use std::sync::{Mutex, PoisonError};
@@ -52,14 +47,7 @@ use tracing_subscriber::registry::{LookupSpan, Registry};
 
 /// The most entries one span's baggage holds. Defined in `carrier::context`.
 pub use crate::carrier::context::MAX_ENTRIES;
-pub(crate) const MAX_KEY: usize = 64;
-pub(crate) const MAX_VALUE: usize = 256;
-pub(crate) const MAX_HEADER: usize = 8192;
-
-/// The whole `concord.` namespace is reserved: no label or incoming baggage
-/// key may start with it, so a key can never collide with an attribute the
-/// library itself writes (`concord.label.*`, `concord.label_conflicts`).
-pub(crate) const RESERVED_NAMESPACE: &str = "concord.";
+use crate::labels::{parse_counted as parse, valid};
 
 /// The attribute prefix under which labels are stamped. Reserved: no label
 /// or incoming baggage key may start with it.
@@ -358,10 +346,7 @@ fn try_add(span: &Span, key: &str, value: String) -> Option<bool> {
         }
         let map = extensions.get_mut::<BaggageMap>()?;
         map.entered = true;
-        let fits = key.len() <= MAX_KEY
-            && !key.is_empty()
-            && !key.starts_with(RESERVED_NAMESPACE)
-            && value.len() <= MAX_VALUE
+        let fits = valid(key, &value)
             && (map.labels.len() < MAX_ENTRIES || map.labels.iter().any(|l| l.key.as_str() == key));
         if !fits {
             return Some(Added::Dropped);
@@ -418,78 +403,13 @@ pub(crate) fn ingest(span: &Span, header: &str) {
     set(span, kept);
 }
 
-/// The valid entries of a `baggage` header, and how many were dropped.
-pub(crate) fn parse(header: &str) -> (Vec<(String, String)>, usize) {
-    let segments: Vec<&str> = header.split(',').filter(|s| !s.trim().is_empty()).collect();
-    if header.len() > MAX_HEADER {
-        return (Vec::new(), segments.len());
-    }
-    let mut kept: Vec<(String, String)> = Vec::new();
-    let mut dropped = 0;
-    for segment in segments {
-        match parse_entry(segment.trim()) {
-            Some((key, value))
-                if !key.starts_with(RESERVED_NAMESPACE)
-                    && (kept.len() < MAX_ENTRIES || kept.iter().any(|(k, _)| *k == key)) =>
-            {
-                kept.retain(|(k, _)| *k != key);
-                kept.push((key, value));
-            }
-            _ => dropped += 1,
-        }
-    }
-    (kept, dropped)
-}
-
-fn parse_entry(segment: &str) -> Option<(String, String)> {
-    let mut parts = segment.split(';');
-    let pair = parts.next()?;
-    // Properties are not kept, but an empty one makes the entry malformed.
-    if parts.any(|property| property.trim().is_empty()) {
-        return None;
-    }
-    if pair.matches('=').count() != 1 {
-        return None;
-    }
-    let mut fields = HashMap::new();
-    fields.insert("baggage".to_owned(), pair.to_owned());
-    let context = BaggagePropagator::new().extract(&Fields(&fields));
-    let mut entries = context.baggage().iter();
-    let (key, (value, _)) = entries.next()?;
-    if entries.next().is_some() {
-        return None;
-    }
-    let (key, value) = (key.as_str().to_owned(), value.as_str().to_owned());
-    (!key.is_empty() && key.len() <= MAX_KEY && value.len() <= MAX_VALUE).then_some((key, value))
-}
-
 /// The entries as a `baggage` header, in order, stopping before the header
 /// would pass its cap. Entries left out are recorded as one
 /// `baggage_dropped`. `None` when there is nothing to send.
 pub(crate) fn format(entries: &[(String, String)]) -> Option<String> {
-    let mut header = String::new();
-    let mut written = 0;
-    for (key, value) in entries.iter().take(MAX_ENTRIES) {
-        let context =
-            Context::new().with_baggage([opentelemetry::KeyValue::new(key.clone(), value.clone())]);
-        let mut out = HashMap::new();
-        BaggagePropagator::new().inject_context(&context, &mut Carrier(&mut out));
-        let Some(piece) = out.remove("baggage").filter(|p| !p.is_empty()) else {
-            continue;
-        };
-        let extra = piece.len() + usize::from(!header.is_empty());
-        if header.len() + extra > MAX_HEADER {
-            break;
-        }
-        if !header.is_empty() {
-            header.push(',');
-        }
-        header.push_str(&piece);
-        written += 1;
-    }
-    let left_out = entries.len() - written;
+    let (header, left_out) = crate::labels::format_counted(entries);
     if left_out > 0 {
         crate::carrier::emit_baggage_dropped(left_out);
     }
-    (!header.is_empty()).then_some(header)
+    header
 }

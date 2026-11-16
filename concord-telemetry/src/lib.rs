@@ -10,6 +10,7 @@ mod init;
 mod init_failure;
 #[cfg(feature = "otel")]
 mod label_collapse;
+pub mod labels;
 mod location;
 mod logfmt;
 mod panic;

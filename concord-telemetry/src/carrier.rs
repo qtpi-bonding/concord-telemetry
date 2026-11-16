@@ -7,6 +7,7 @@
 
 use crate::coded::emit_coded;
 use crate::init::EVENT_TARGET;
+use crate::labels;
 #[cfg(feature = "otel")]
 use crate::propagation::Fields;
 #[cfg(feature = "otel")]
@@ -156,6 +157,70 @@ pub fn extract_ingress(name: &'static str, span: &Span, c: &TraceCarrier) {
 #[cfg(not(feature = "otel"))]
 pub fn extract_ingress(_name: &'static str, _span: &Span, _c: &TraceCarrier) {}
 
+/// `c` with label `key` set to `value`: the entry is replaced in place when
+/// the carrier's baggage has the key, otherwise appended. Everything else in
+/// the carrier is kept; the baggage is rewritten from its valid entries
+/// (properties and malformed entries are dropped, as `labels::parse` does).
+/// A label that is not valid (empty or over-long key, key in the reserved
+/// `concord.` namespace, value over 256 bytes, a 25th entry, or a header that
+/// would pass its cap) leaves `c` unchanged and records
+/// `concord.trace.baggage_dropped`. Pure apart from that record.
+pub fn with_label(c: &TraceCarrier, key: &str, value: &str) -> TraceCarrier {
+    let mut entries = c.baggage.as_deref().map(labels::parse).unwrap_or_default();
+    let replaced = match entries.iter_mut().find(|(k, _)| k == key) {
+        Some(entry) => {
+            entry.1 = value.to_owned();
+            true
+        }
+        None => {
+            entries.push((key.to_owned(), value.to_owned()));
+            false
+        }
+    };
+    let (header, left_out) = labels::format_counted(&entries);
+    if !labels::valid(key, value)
+        || (!replaced && entries.len() > context::MAX_ENTRIES)
+        || left_out > 0
+    {
+        emit_baggage_dropped(1);
+        return c.clone();
+    }
+    TraceCarrier {
+        baggage: header,
+        ..c.clone()
+    }
+}
+
+/// `c` without label `key`. A carrier whose baggage does not have the key is
+/// returned unchanged; otherwise the baggage is rewritten from its valid
+/// entries without it, and is `None` when none are left.
+pub fn without_label(c: &TraceCarrier, key: &str) -> TraceCarrier {
+    let Some(header) = c.baggage.as_deref() else {
+        return c.clone();
+    };
+    let mut entries = labels::parse(header);
+    let before = entries.len();
+    entries.retain(|(k, _)| k != key);
+    if entries.len() == before {
+        return c.clone();
+    }
+    TraceCarrier {
+        baggage: labels::format(&entries),
+        ..c.clone()
+    }
+}
+
+/// Parents `span` on the carrier when it has a `traceparent`, otherwise on the
+/// `TRACEPARENT` and `BAGGAGE` environment variables. A carrier with a
+/// `traceparent` wins even when the environment has one. Call it before
+/// `span` is first entered; without the `otel` feature it does nothing.
+pub fn parent_on_or_env(span: &Span, c: Option<&TraceCarrier>) {
+    match c.filter(|c| c.traceparent.as_deref().is_some_and(|t| !t.is_empty())) {
+        Some(c) => parent_on(span, c),
+        None => crate::propagation::set_parent_from_env(span),
+    }
+}
+
 /// A span with no parent: it starts a trace of its own.
 pub fn root(name: &'static str) -> Span {
     tracing::info_span!(target: EVENT_TARGET, parent: None, "root", otel.name = name)
@@ -276,7 +341,6 @@ fn emit_trace_missing(hop: &'static str) {
     );
 }
 
-#[cfg(feature = "otel")]
 pub(crate) fn emit_baggage_dropped(count: usize) {
     emit_coded!(
         tracing::Level::WARN,
