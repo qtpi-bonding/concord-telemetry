@@ -1,0 +1,6 @@
+error: field `count` is int in the shared registry; proto field is string
+ --> tests/ui/type_mismatch.rs:8:5
+  |
+8 | /     #[prost(string, tag = "2")]
+9 | |     count: String,
+  | |_________________^

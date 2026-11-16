@@ -127,6 +127,29 @@ fn never_names() -> Vec<String> {
     concord_fields::shared().never.into_iter().collect()
 }
 
+/// The registry type a scalar prost kind stands for. `None` for message kinds
+/// (`Timestamp`, `Duration`, `Principal`), which are not checked.
+fn kind_type(kind: Kind) -> Option<concord_fields::FieldType> {
+    use concord_fields::FieldType;
+    match kind {
+        Kind::String | Kind::Enum => Some(FieldType::Str),
+        Kind::Bool => Some(FieldType::Bool),
+        Kind::I32 | Kind::I64 | Kind::U32 | Kind::U64 => Some(FieldType::Int),
+        Kind::F32 | Kind::F64 => Some(FieldType::Float),
+        _ => None,
+    }
+}
+
+fn type_word(ty: concord_fields::FieldType) -> &'static str {
+    use concord_fields::FieldType;
+    match ty {
+        FieldType::Str => "string",
+        FieldType::Int => "int",
+        FieldType::Float => "float",
+        FieldType::Bool => "bool",
+    }
+}
+
 #[proc_macro_derive(Event, attributes(concord_event))]
 pub fn event_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -178,6 +201,7 @@ fn expand(input: &DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
         })?;
     let type_name = format!("{}.{}", package, name);
     let never = never_names();
+    let shared = concord_fields::shared();
     let mut source = false;
     let mut emits = Vec::new();
     let mut rebuilds = Vec::new();
@@ -211,6 +235,28 @@ fn expand(input: &DeriveInput) -> Result<proc_macro2::TokenStream, Error> {
                 field,
                 "bytes/map/oneof content stays in the source record",
             ));
+        }
+        // A name in the shared registry fixes the type; local names are not
+        // visible here and are checked by the linter. `source_record_id` has
+        // its own, more specific diagnostic below.
+        if let (Some(def), Some(actual), true) = (
+            shared.names.get(&fname),
+            kind_type(kind),
+            fname != "source_record_id",
+        ) {
+            if def.ty != actual {
+                return Err(Error::new_spanned(
+                    field,
+                    format!(
+                        "field `{fname}` is {} in the shared registry; proto field is {}",
+                        type_word(def.ty),
+                        match kind {
+                            Kind::Enum => "enum",
+                            _ => type_word(actual),
+                        }
+                    ),
+                ));
+            }
         }
         let ty = &field.ty;
         let repeated = is_repeated(ty);
