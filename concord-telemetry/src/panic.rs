@@ -118,3 +118,48 @@ fn flush_target() {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[cfg(feature = "otel")]
+    fn install_with(seconds: u64) {
+        install(None, None, Duration::from_secs(seconds));
+    }
+
+    #[cfg(not(feature = "otel"))]
+    fn install_with(_seconds: u64) {
+        install();
+    }
+
+    /// Two installs (the second with different providers and deadline) chain
+    /// the previous hook once: it runs once per panic, not twice.
+    #[test]
+    fn second_install_does_not_chain_the_hook_again() {
+        let probe = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&probe);
+        std::panic::set_hook(Box::new(move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        install_with(1);
+        install_with(7);
+
+        #[cfg(feature = "otel")]
+        {
+            let target = TARGET.lock().unwrap_or_else(PoisonError::into_inner);
+            let deadline = target.as_ref().map(|target| target.deadline);
+            assert_eq!(deadline, Some(Duration::from_secs(7)), "latest target wins");
+        }
+        for round in 1..=2 {
+            assert!(std::thread::spawn(|| std::panic::panic_any("probe"))
+                .join()
+                .is_err());
+            assert_eq!(probe.load(Ordering::SeqCst), round);
+        }
+        assert!(PREVIOUS.get().is_some());
+    }
+}

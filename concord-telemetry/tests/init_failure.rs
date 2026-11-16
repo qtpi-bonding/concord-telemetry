@@ -65,3 +65,27 @@ fn no_trailing_newline_in_line() {
     assert!(!line.ends_with('\n'));
     assert!(!line.contains('\n'));
 }
+
+fn count(haystack: &str, needle: &str) -> usize {
+    haystack.matches(needle).count()
+}
+
+#[test]
+fn real_json_file_error_shows_its_cause_once() {
+    let io = std::io::Error::new(std::io::ErrorKind::NotFound, "cause-marker-xyz");
+    let err = concord_telemetry::InitError::JsonFile(io);
+    let line = init_failure_line("svc", &err);
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let message = value["message"].as_str().unwrap();
+    assert_eq!(count(message, "cause-marker-xyz"), 1, "{message}");
+}
+
+#[test]
+fn real_exporter_error_shows_its_cause_once() {
+    let cause: Box<dyn std::error::Error + Send + Sync> = "cause-marker-xyz".into();
+    let err = concord_telemetry::InitError::Exporter(cause);
+    let line = init_failure_line("svc", &err);
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let message = value["message"].as_str().unwrap();
+    assert_eq!(count(message, "cause-marker-xyz"), 1, "{message}");
+}

@@ -118,9 +118,9 @@ pub enum LocalOutput {
 pub enum InitError {
     #[error("a global tracing subscriber is already set")]
     AlreadyInitialized,
-    #[error("OTLP exporter: {0}")]
+    #[error("OTLP exporter")]
     Exporter(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("opening the JSON log file: {0}")]
+    #[error("opening the JSON log file")]
     JsonFile(#[source] std::io::Error),
 }
 
