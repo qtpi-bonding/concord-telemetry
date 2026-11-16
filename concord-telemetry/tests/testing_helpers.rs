@@ -36,6 +36,24 @@ fn unregistered_key_panics() {
 }
 
 #[test]
+#[should_panic(expected = "concord.label.bogus")]
+fn unregistered_label_key_panics() {
+    check_attributes(
+        &Registry::shared(),
+        "my-span",
+        &pairs(&[("concord.label.bogus", "x")]),
+    );
+}
+
+#[test]
+fn registered_label_key_passes() {
+    let registry = Registry::shared();
+    let name = registry.label_names().remove(0);
+    let key = format!("concord.label.{name}");
+    check_attributes(&registry, "my-span", &pairs(&[(key.as_str(), "x")]));
+}
+
+#[test]
 fn layer_keys_and_error_keys_pass() {
     check_attributes(
         &Registry::shared(),

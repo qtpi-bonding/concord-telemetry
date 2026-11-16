@@ -395,10 +395,12 @@ fn string_attr(attrs: &Attrs, name: &str) -> Option<String> {
 const LAYER_KEYS: &[&str] = &["target", "level", "busy_ns", "idle_ns"];
 const LAYER_PREFIXES: &[&str] = &["otel.", "code.", "thread."];
 
-fn library_owned(key: &str) -> bool {
+fn library_owned(registry: &Registry, key: &str) -> bool {
     LAYER_KEYS.contains(&key)
         || LAYER_PREFIXES.iter().any(|p| key.starts_with(p))
-        || key.starts_with(LABEL_PREFIX)
+        || key
+            .strip_prefix(LABEL_PREFIX)
+            .is_some_and(|name| registry.label_names().iter().any(|n| n == name))
         || key == "concord.label_conflicts"
 }
 
@@ -410,7 +412,7 @@ pub fn check_attributes(registry: &Registry, span: &str, pairs: &[(String, Strin
         if let Some((_, first)) = pairs[..i].iter().find(|(k, _)| k == key) {
             panic!("span {span:?} has duplicate key {key:?}: {first:?} and {value:?}");
         }
-        if library_owned(key) {
+        if library_owned(registry, key) {
             continue;
         }
         match registry.check(key) {
