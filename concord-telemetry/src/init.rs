@@ -2,7 +2,10 @@ use crate::logfmt::TraceFormat;
 #[cfg(feature = "otel")]
 use crate::logfmt::{BaggageBridge, BaggageLogProcessor};
 #[cfg(feature = "otel")]
-use crate::{deadline::run_with_deadline, PrincipalKind};
+use crate::{
+    deadline::{finish_providers, run_with_deadline},
+    PrincipalKind,
+};
 use crate::{panic, Principal};
 #[cfg(feature = "otel")]
 use opentelemetry::KeyValue;
@@ -112,15 +115,9 @@ impl Drop for Guard {
         if logs.is_none() && traces.is_none() {
             return;
         }
+        crate::panic::release();
         run_with_deadline(self.deadline, move || {
-            if let Some(provider) = logs {
-                let _ = provider.force_flush();
-                let _ = provider.shutdown();
-            }
-            if let Some(provider) = traces {
-                let _ = provider.force_flush();
-                let _ = provider.shutdown();
-            }
+            finish_providers(logs.as_ref(), traces.as_ref());
         });
     }
 }
@@ -391,25 +388,47 @@ where
     Box::new(tracing_opentelemetry::layer().with_tracer(provider.tracer("concord-telemetry")))
 }
 
+/// The exporters `init` installs. Without the `otel` feature there are none.
+#[cfg(feature = "otel")]
+struct Exporters {
+    logs: Option<SdkLoggerProvider>,
+    traces: Option<SdkTracerProvider>,
+}
+
+#[cfg(not(feature = "otel"))]
+struct Exporters {}
+
+/// Builds one OTLP exporter over HTTP, mapping a build failure to
+/// `InitError::Exporter`.
+#[cfg(feature = "otel")]
+fn build_exporter<T>(
+    build: impl FnOnce() -> Result<T, opentelemetry_otlp::ExporterBuildError>,
+) -> Result<T, InitError> {
+    build().map_err(|error| InitError::Exporter(Box::new(error)))
+}
+
 /// The OTLP log and trace providers, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 #[cfg(feature = "otel")]
-fn exporters(
-    config: &Config,
-) -> Result<(Option<SdkLoggerProvider>, Option<SdkTracerProvider>), InitError> {
+fn exporters(config: &Config) -> Result<Exporters, InitError> {
     if std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_none() {
-        return Ok((None, None));
+        return Ok(Exporters {
+            logs: None,
+            traces: None,
+        });
     }
     let resource = resource(config);
-    let log_exporter = opentelemetry_otlp::LogExporter::builder()
-        .with_http()
-        .with_protocol(Protocol::HttpBinary)
-        .build()
-        .map_err(|error| InitError::Exporter(Box::new(error)))?;
-    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_http()
-        .with_protocol(Protocol::HttpBinary)
-        .build()
-        .map_err(|error| InitError::Exporter(Box::new(error)))?;
+    let log_exporter = build_exporter(|| {
+        opentelemetry_otlp::LogExporter::builder()
+            .with_http()
+            .with_protocol(Protocol::HttpBinary)
+            .build()
+    })?;
+    let span_exporter = build_exporter(|| {
+        opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_protocol(Protocol::HttpBinary)
+            .build()
+    })?;
     let logs = SdkLoggerProvider::builder()
         .with_resource(resource.clone())
         .with_log_processor(BaggageLogProcessor(
@@ -423,7 +442,58 @@ fn exporters(
             BatchSpanProcessor::builder(span_exporter).build(),
         ))
         .build();
-    Ok((Some(logs), Some(traces)))
+    Ok(Exporters {
+        logs: Some(logs),
+        traces: Some(traces),
+    })
+}
+
+/// Off build: there are no exporters, and `OTEL_EXPORTER_OTLP_ENDPOINT` is ignored.
+#[cfg(not(feature = "otel"))]
+fn exporters(_config: &Config) -> Result<Exporters, InitError> {
+    Ok(Exporters {})
+}
+
+/// Builds the subscriber, installs it, and sets up the carrier and panic hook.
+/// The local layer is built before any global state is set, so a failure
+/// there (`JsonFile`) leaves no global state changed.
+#[cfg(feature = "otel")]
+fn install(exporters: Exporters, config: &Config) -> Result<Guard, InitError> {
+    let Exporters { logs, traces } = exporters;
+    let log_layer = logs.as_ref().map(log_bridge_layer);
+    let trace_layer = traces.as_ref().map(span_layer);
+    let baggage_layer = traces.as_ref().map(|_| crate::baggage::BaggageLayer);
+    let subscriber = tracing_subscriber::registry()
+        .with(filter(logs.is_some()))
+        .with(trace_layer)
+        .with(baggage_layer)
+        .with(log_layer)
+        .with(local_layer(config.local.clone())?);
+    if subscriber.try_init().is_err() {
+        return Err(InitError::AlreadyInitialized);
+    }
+    crate::carrier::set_otel_active(traces.is_some());
+    panic::install(logs.clone(), traces.clone(), config.flush_deadline);
+    Ok(Guard {
+        logs,
+        traces,
+        deadline: config.flush_deadline,
+    })
+}
+
+/// Builds the subscriber, installs it, and sets up the panic hook.
+/// The local layer is built before any global state is set, so a failure
+/// there (`JsonFile`) leaves no global state changed.
+#[cfg(not(feature = "otel"))]
+fn install(_exporters: Exporters, config: &Config) -> Result<Guard, InitError> {
+    let subscriber = tracing_subscriber::registry()
+        .with(filter(false))
+        .with(local_layer(config.local.clone())?);
+    if subscriber.try_init().is_err() {
+        return Err(InitError::AlreadyInitialized);
+    }
+    panic::install();
+    Ok(Guard {})
 }
 
 pub fn init(config: Config) -> Result<Guard, InitError> {
@@ -431,49 +501,12 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
         return Err(InitError::AlreadyInitialized);
     }
     let unknown_error_text = crate::error::set_error_text_from_env();
-
-    #[cfg(feature = "otel")]
-    let (logs, traces) = exporters(&config)?;
-
-    let local = local_layer(config.local)?;
-    #[cfg(feature = "otel")]
-    let subscriber = {
-        let log_layer = logs.as_ref().map(log_bridge_layer);
-        let trace_layer = traces.as_ref().map(span_layer);
-        let baggage_layer = traces.as_ref().map(|_| crate::baggage::BaggageLayer);
-        tracing_subscriber::registry()
-            .with(filter(logs.is_some()))
-            .with(trace_layer)
-            .with(baggage_layer)
-            .with(log_layer)
-            .with(local)
-    };
-    #[cfg(not(feature = "otel"))]
-    let subscriber = tracing_subscriber::registry()
-        .with(filter(false))
-        .with(local);
-    if subscriber.try_init().is_err() {
-        return Err(InitError::AlreadyInitialized);
-    }
-
-    #[cfg(feature = "otel")]
-    {
-        crate::carrier::set_otel_active(traces.is_some());
-        panic::install(logs.clone(), traces.clone(), config.flush_deadline);
-    }
-    #[cfg(not(feature = "otel"))]
-    panic::install();
+    let exporters = exporters(&config)?;
+    let guard = install(exporters, &config)?;
     if let Some(value) = unknown_error_text.as_deref() {
         crate::error::warn_unknown_error_text(value);
     }
-    Ok(Guard {
-        #[cfg(feature = "otel")]
-        logs,
-        #[cfg(feature = "otel")]
-        traces,
-        #[cfg(feature = "otel")]
-        deadline: config.flush_deadline,
-    })
+    Ok(guard)
 }
 
 #[cfg(all(test, feature = "testing"))]

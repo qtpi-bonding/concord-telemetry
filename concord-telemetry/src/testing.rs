@@ -74,7 +74,9 @@ fn install() -> &'static InMemoryLogExporter {
                 span_exporter.clone(),
             )))
             .build();
-        let _ = SPANS.set(span_exporter);
+        SPANS
+            .set(span_exporter)
+            .expect("the span exporter is set once, inside the install once-cell");
         let span_layer =
             tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("capture"));
         let bridge = EventsOnly(BaggageBridge(
