@@ -157,7 +157,10 @@ pub async fn shutdown_signal() {
                 result = tokio::signal::ctrl_c() => result.map(|()| "ctrl_c"),
                 _ = term.recv() => Ok("sigterm"),
             },
-            Err(error) => Err(error),
+            Err(error) => {
+                tracing::warn!(%error, "SIGTERM handler not registered; waiting for ctrl-c only");
+                tokio::signal::ctrl_c().await.map(|()| "ctrl_c")
+            }
         }
     };
     #[cfg(not(unix))]
