@@ -2,27 +2,33 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use crate::error::LintError;
 use crate::scan::Violation;
 
-pub fn read(path: &Path) -> Result<BTreeMap<String, usize>, String> {
-    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+pub fn read(path: &Path) -> Result<BTreeMap<String, usize>, LintError> {
+    let text = fs::read_to_string(path).map_err(|source| LintError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
     let mut result = BTreeMap::new();
     for (line_number, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
-        let (count, key) = line
-            .split_once('\t')
-            .ok_or_else(|| format!("invalid baseline line {}", line_number + 1))?;
-        let count: usize = count
-            .parse()
-            .map_err(|_| format!("invalid baseline count on line {}", line_number + 1))?;
+        let (count, key) = line.split_once('\t').ok_or_else(|| LintError::Parse {
+            path: path.to_path_buf(),
+            message: format!("invalid baseline line {}", line_number + 1),
+        })?;
+        let count: usize = count.parse().map_err(|_| LintError::Parse {
+            path: path.to_path_buf(),
+            message: format!("invalid baseline count on line {}", line_number + 1),
+        })?;
         result.insert(key.to_string(), count);
     }
     Ok(result)
 }
 
-pub fn write(path: &Path, violations: &[Violation]) -> Result<(), String> {
+pub fn write(path: &Path, violations: &[Violation]) -> Result<(), LintError> {
     let mut counts = BTreeMap::new();
     for violation in violations {
         *counts.entry(violation.key()).or_insert(0) += 1;
@@ -31,7 +37,10 @@ pub fn write(path: &Path, violations: &[Violation]) -> Result<(), String> {
     for (key, count) in counts {
         text.push_str(&format!("{count}\t{key}\n"));
     }
-    fs::write(path, text).map_err(|error| error.to_string())
+    fs::write(path, text).map_err(|source| LintError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 pub fn apply(

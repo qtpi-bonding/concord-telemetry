@@ -1,6 +1,6 @@
 [package]
 name = "concord-lint"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -14,3 +14,4 @@ syn = { version = "2", features = ["full", "visit", "parsing", "extra-traits"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
 concord-fields = { path = "../concord-fields", version = "0.2.0" }
+thiserror = "2"

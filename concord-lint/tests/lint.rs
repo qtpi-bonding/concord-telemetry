@@ -729,3 +729,56 @@ fn instrument_on_a_trait_default_method_is_checked() {
     )
     .is_empty());
 }
+
+#[test]
+fn missing_type_in_local_registry_exits_2() {
+    let dir = std::env::temp_dir().join(format!("concord-lint-notype-{}", std::process::id()));
+    fs::create_dir_all(&dir).expect("temp dir");
+    let local = dir.join("local-fields.toml");
+    fs::write(
+        &local,
+        "[fields]\nwidget = { meaning = \"no type here\" }\n",
+    )
+    .expect("write local");
+    let output = binary()
+        .args(["--local", local.to_str().expect("path is utf8")])
+        .arg(fixture("clean.rs"))
+        .output()
+        .expect("lint runs");
+    fs::remove_dir_all(&dir).expect("cleanup");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf8");
+    assert!(stderr.contains("widget"), "{stderr}");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn unregistered_error_code_field_is_ok_now() {
+    let source = "use tracing::error; fn f() { error!(error.code = \"x\", \"failed\"); }";
+    assert!(scan("src/lib.rs", source).is_empty());
+}
+
+#[test]
+fn lint_errors_are_typed() {
+    use concord_lint::{baseline, LintError};
+    let missing = Path::new("/nonexistent/concord-lint-baseline.txt");
+    match baseline::read(missing) {
+        Err(LintError::Io { path, .. }) => assert_eq!(path, missing),
+        other => panic!("expected Io, got {other:?}"),
+    }
+    match scan_file(Path::new("bad.rs"), "fn (", &Registry::shared()) {
+        Err(LintError::Parse { path, message }) => {
+            assert_eq!(path, Path::new("bad.rs"));
+            assert!(!message.is_empty());
+        }
+        other => panic!("expected Parse, got {other:?}"),
+    }
+    let error = Registry::shared()
+        .with_local("[fields]\nwidget = { meaning = \"m\" }")
+        .map(|_| ())
+        .map_err(LintError::from)
+        .expect_err("missing type");
+    assert!(matches!(error, LintError::Registry(_)));
+    assert!(error.to_string().contains("widget"));
+    assert!(LintError::BadArgs("x".into()).to_string().contains('x'));
+}

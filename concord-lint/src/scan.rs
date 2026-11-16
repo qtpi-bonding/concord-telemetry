@@ -9,6 +9,8 @@ use syn::{Attribute, Expr, ExprCall, ItemFn, ItemImpl, ItemMod, Macro, Path as S
 
 use concord_fields::{FieldVerdict, Registry};
 
+use crate::error::LintError;
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Violation {
     pub path: String,
@@ -30,8 +32,15 @@ impl Violation {
     }
 }
 
-pub fn scan_file(path: &Path, source: &str, registry: &Registry) -> Result<Vec<Violation>, String> {
-    let syntax = syn::parse_file(source).map_err(|error| error.to_string())?;
+pub fn scan_file(
+    path: &Path,
+    source: &str,
+    registry: &Registry,
+) -> Result<Vec<Violation>, LintError> {
+    let syntax = syn::parse_file(source).map_err(|error| LintError::Parse {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })?;
     let mut visitor = Scanner::new(path, registry);
     visitor.collect_imports(&syntax);
     visitor.visit_file(&syntax);

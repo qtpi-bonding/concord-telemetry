@@ -203,12 +203,13 @@ dependencies = [
 
 [[package]]
 name = "concord-lint"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "concord-fields",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+ "thiserror",
 ]
 
 [[package]]
