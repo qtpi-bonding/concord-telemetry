@@ -36,7 +36,9 @@ pub use concord_telemetry_derive::Event;
 pub use concord_telemetry_proto::v1::{Principal, PrincipalKind, Verification};
 pub use error::{emit_error_at, error_text, set_error_text, ErrorText};
 pub use event::{AttrValue, Attrs, Event, RebuildError};
-pub use init::{init, BuildInfo, Config, Guard, InitError, LocalOutput, EVENT_TARGET};
+pub use init::{
+    init, BuildInfo, Config, Guard, InitError, LocalOutput, EVENT_TARGET, RESOURCE_KEYS,
+};
 pub use init_failure::{init_failure_line, report_init_failure};
 #[cfg(feature = "otel")]
 pub use label_collapse::LabelCollapse;

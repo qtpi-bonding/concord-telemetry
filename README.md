@@ -107,6 +107,17 @@ it are ignored, and `OTEL_SERVICE_NAME` is not read: the service's identity is
 the caller's. A malformed entry (no `=`, empty key, bad percent escape) is
 skipped and the others still apply.
 
+### Resource keys
+
+`concord_telemetry::RESOURCE_KEYS` lists the keys the library sets or passes
+through: `service.name`, `service.version`, `service.instance.id`, `host.name`,
+`vcs.repository.name`, `vcs.ref.head.revision`, `deployment.environment.name`,
+`agent.id`, `place.id` and `principal.*`. The last three non-principal keys
+(`deployment.environment.name`, `agent.id`, `place.id`) are set only through
+`OTEL_RESOURCE_ATTRIBUTES`; the old `deployment.environment` is passed through
+as is, never translated. A key starting `concord.` in the environment is
+skipped (reserved namespace).
+
 Log records also carry `code.file.path`, `code.line.number` and
 `code.module.name`, the same keys spans carry. For `error!` and
 `error_anyhow!` they are the macro call site; for `event!` too (not the event

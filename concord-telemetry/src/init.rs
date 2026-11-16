@@ -29,6 +29,34 @@ use tracing_subscriber::{
 };
 
 pub const EVENT_TARGET: &str = "concord_telemetry::event";
+
+/// The resource attribute keys the library sets or passes through, by their
+/// semconv names: `service.name`, `service.version`, `service.instance.id`,
+/// `host.name`, `vcs.repository.name`, `vcs.ref.head.revision`,
+/// `deployment.environment.name`, `agent.id`, `place.id`, `principal.kind`,
+/// `principal.id`, `principal.verified_by` and `principal.via`.
+///
+/// `agent.id`, `place.id` and `deployment.environment.name` are set only
+/// through `OTEL_RESOURCE_ATTRIBUTES`. The old `deployment.environment` key is
+/// passed through unchanged and never translated to the new name. Keys starting
+/// with `concord.` in the environment are skipped, since that namespace is
+/// reserved. The `principal.*` keys come from `Config`.
+pub const RESOURCE_KEYS: [&str; 13] = [
+    "service.name",
+    "service.version",
+    "service.instance.id",
+    "host.name",
+    "vcs.repository.name",
+    "vcs.ref.head.revision",
+    "deployment.environment.name",
+    "agent.id",
+    "place.id",
+    "principal.kind",
+    "principal.id",
+    "principal.verified_by",
+    "principal.via",
+];
+
 /// Target of the gRPC trace spans (`grpc` feature).
 pub(crate) const GRPC_TARGET: &str = "concord_telemetry::grpc";
 pub(crate) const HTTP_TARGET: &str = "concord_telemetry::http";
@@ -168,10 +196,14 @@ fn directive(target: &str, level: LevelFilter) -> Directive {
 }
 
 /// Resource keys the environment cannot set: the service's identity is the
-/// caller's, the instance id is generated, and principals come from `Config`.
+/// caller's, the instance id is generated, principals come from `Config`, and
+/// the `concord.` namespace is reserved for the library.
 #[cfg(feature = "otel")]
 fn reserved(key: &str) -> bool {
-    key == "service.name" || key == "service.instance.id" || key.starts_with("principal.")
+    key == "service.name"
+        || key == "service.instance.id"
+        || key.starts_with("principal.")
+        || key.starts_with("concord.")
 }
 
 /// Percent-decodes an `OTEL_RESOURCE_ATTRIBUTES` value; `None` on a malformed
@@ -687,6 +719,82 @@ mod resource_tests {
         assert_eq!(get(&resource, "service.name").as_deref(), Some("svc"));
         assert_ne!(get(&resource, "service.instance.id").as_deref(), Some("x"));
         assert_eq!(get(&resource, "principal.id"), None);
+    }
+
+    #[test]
+    fn environment_name_agent_and_place_are_kept() {
+        let resource = resource_with(
+            &config(),
+            Some("deployment.environment.name=prod,agent.id=a1,place.id=home"),
+            None,
+        );
+        assert_eq!(
+            get(&resource, "deployment.environment.name").as_deref(),
+            Some("prod")
+        );
+        assert_eq!(get(&resource, "agent.id").as_deref(), Some("a1"));
+        assert_eq!(get(&resource, "place.id").as_deref(), Some("home"));
+    }
+
+    #[test]
+    fn old_environment_key_is_not_translated() {
+        let resource = resource_with(&config(), Some("deployment.environment=prod"), None);
+        assert_eq!(
+            get(&resource, "deployment.environment").as_deref(),
+            Some("prod")
+        );
+        assert_eq!(get(&resource, "deployment.environment.name"), None);
+    }
+
+    #[test]
+    fn reserved_concord_key_in_env_is_skipped() {
+        let resource = resource_with(
+            &config(),
+            Some("concord.anything=x,concord.trace.missing=y,concordant=ok"),
+            None,
+        );
+        assert_eq!(get(&resource, "concord.anything"), None);
+        assert_eq!(get(&resource, "concord.trace.missing"), None);
+        assert_eq!(get(&resource, "concordant").as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn resource_keys_const_lists_every_library_set_key() {
+        let mut built = config().with_build_info(BuildInfo {
+            repository: "repo",
+            revision: "abc",
+        });
+        built.principal = Some(
+            Principal::new(PrincipalKind::Agent, "p1")
+                .with_verified_by([crate::Verification::DelegationCert])
+                .with_via("delegation"),
+        );
+        let resource = resource_with(
+            &built,
+            Some("deployment.environment.name=prod,agent.id=a1,place.id=home"),
+            Some("machine".into()),
+        );
+        for key in RESOURCE_KEYS {
+            assert!(get(&resource, key).is_some(), "{key} missing from resource");
+        }
+        for key in [
+            "service.name",
+            "service.version",
+            "service.instance.id",
+            "host.name",
+            "vcs.repository.name",
+            "vcs.ref.head.revision",
+            "deployment.environment.name",
+            "agent.id",
+            "place.id",
+            "principal.kind",
+            "principal.id",
+            "principal.verified_by",
+            "principal.via",
+        ] {
+            assert!(RESOURCE_KEYS.contains(&key), "{key} not listed");
+        }
+        assert_eq!(RESOURCE_KEYS.len(), 13);
     }
 
     #[test]
