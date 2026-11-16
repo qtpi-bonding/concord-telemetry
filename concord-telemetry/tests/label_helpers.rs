@@ -45,6 +45,20 @@ fn format_round_trips() {
 }
 
 #[test]
+fn encode_is_w3c_strict_and_round_trips() {
+    let key = "k()<>@:/[]{}?\\\"";
+    let value = "x\\y, z;\"q\"%\u{e9}";
+    let header = labels::format(&pairs(&[(key, value)])).expect("header");
+    let (k, v) = header.split_once('=').expect("pair");
+    let token = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
+    assert!(k.bytes().all(token), "key not a token: {k}");
+    let octet = |b: u8| matches!(b, 0x21 | 0x23..=0x2B | 0x2D..=0x3A | 0x3C..=0x5B | 0x5D..=0x7E);
+    assert!(v.bytes().all(octet), "value not baggage-octet: {v}");
+    assert!(v.starts_with("x%5Cy%2C%20z%3B%22q%22%25"), "{v}");
+    assert_eq!(labels::parse(&header), pairs(&[(key, value)]));
+}
+
+#[test]
 fn with_label_replaces_existing() {
     let c = with_baggage("a=1,b=2");
     let out = carrier::with_label(&c, "a", "9");
@@ -95,6 +109,64 @@ mod traced {
         let dropped = captured.errors_where(|e| e.code == concord_telemetry::BAGGAGE_DROPPED_CODE);
         assert_eq!(dropped.len(), 1);
         assert_eq!(dropped[0].fields.get("dropped"), Some(&AttrValue::I64(1)));
+    }
+
+    fn dropped_count(captured: &concord_telemetry::testing::ExclusiveCapture) -> usize {
+        captured
+            .errors_where(|e| e.code == concord_telemetry::BAGGAGE_DROPPED_CODE)
+            .len()
+    }
+
+    fn assert_kept_and_reported(
+        out: &TraceCarrier,
+        c: &TraceCarrier,
+        captured: &concord_telemetry::testing::ExclusiveCapture,
+    ) {
+        assert_eq!(out, c);
+        assert_eq!(dropped_count(captured), 1);
+    }
+
+    fn oversize() -> String {
+        (0..40)
+            .map(|i| format!("k{i}={}", "x".repeat(250)))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    #[test]
+    fn with_label_keeps_oversize_or_dirty_baggage_and_reports() {
+        for header in [
+            oversize(),
+            "a=1,bad".to_owned(),
+            "a=1,concord.x=2".to_owned(),
+        ] {
+            let captured = capture_exclusive();
+            let c = with_baggage(&header);
+            let out = carrier::with_label(&c, "b", "2");
+            assert_kept_and_reported(&out, &c, &captured);
+        }
+    }
+
+    #[test]
+    fn without_label_keeps_oversize_or_dirty_baggage_and_reports() {
+        for header in [
+            oversize(),
+            "a=1,b=2,bad".to_owned(),
+            "a=1,b=2,concord.x=2".to_owned(),
+        ] {
+            let captured = capture_exclusive();
+            let c = with_baggage(&header);
+            let out = carrier::without_label(&c, "b");
+            assert_kept_and_reported(&out, &c, &captured);
+        }
+    }
+
+    #[test]
+    fn without_label_on_clean_header_does_not_report() {
+        let captured = capture_exclusive();
+        let out = carrier::without_label(&with_baggage("a=1,b=2"), "b");
+        assert_eq!(out.baggage.as_deref(), Some("a=1"));
+        assert_eq!(dropped_count(&captured), 0);
     }
 
     fn exported(name: &str) -> opentelemetry_sdk::trace::SpanData {

@@ -109,18 +109,34 @@ fn decode(text: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// Percent-encodes everything but printable ASCII other than space, `"`,
-/// `,`, `;`, `=` and `%`.
-fn encode(text: &str) -> String {
+/// Percent-encodes everything outside `keep`, byte by byte.
+fn encode_with(text: &str, keep: impl Fn(u8) -> bool) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
-        if byte.is_ascii_graphic() && !matches!(byte, b'"' | b',' | b';' | b'=' | b'%') {
+        if keep(byte) {
             out.push(byte as char);
         } else {
             out.push_str(&format!("%{byte:02X}"));
         }
     }
     out
+}
+
+/// A key, percent-encoded to the W3C `token` set (alphanumerics and
+/// ``!#$%&'*+-.^_`|~``); `%` itself is escaped.
+fn encode_key(text: &str) -> String {
+    encode_with(text, |b| {
+        b != b'%' && (b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+    })
+}
+
+/// A value, percent-encoded to the W3C `baggage-octet` set (0x21, 0x23-2B,
+/// 0x2D-3A, 0x3C-5B, 0x5D-7E, minus `%`).
+fn encode_value(text: &str) -> String {
+    encode_with(
+        text,
+        |b| matches!(b, 0x21 | 0x23..=0x24 | 0x26..=0x2B | 0x2D..=0x3A | 0x3C..=0x5B | 0x5D..=0x7E),
+    )
 }
 
 /// The entries as a `baggage` header, in order, percent-encoded, and how many
@@ -130,7 +146,7 @@ pub(crate) fn format_counted(entries: &[(String, String)]) -> (Option<String>, u
     let mut header = String::new();
     let mut written = 0;
     for (key, value) in entries.iter().take(MAX_ENTRIES) {
-        let piece = format!("{}={}", encode(key), encode(value));
+        let piece = format!("{}={}", encode_key(key), encode_value(value));
         let extra = piece.len() + usize::from(!header.is_empty());
         if header.len() + extra > MAX_HEADER {
             break;

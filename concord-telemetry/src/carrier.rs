@@ -159,14 +159,25 @@ pub fn extract_ingress(_name: &'static str, _span: &Span, _c: &TraceCarrier) {}
 
 /// `c` with label `key` set to `value`: the entry is replaced in place when
 /// the carrier's baggage has the key, otherwise appended. Everything else in
-/// the carrier is kept; the baggage is rewritten from its valid entries
-/// (properties and malformed entries are dropped, as `labels::parse` does).
+/// the carrier is kept; the baggage is rewritten from its entries
+/// (properties are dropped, as `labels::parse` does). A header that is over
+/// 8192 bytes or has malformed or reserved entries would lose them in the
+/// rewrite, so `c` is returned unchanged and `concord.trace.baggage_dropped`
+/// is recorded.
 /// A label that is not valid (empty or over-long key, key in the reserved
 /// `concord.` namespace, value over 256 bytes, a 25th entry, or a header that
 /// would pass its cap) leaves `c` unchanged and records
 /// `concord.trace.baggage_dropped`. Pure apart from that record.
 pub fn with_label(c: &TraceCarrier, key: &str, value: &str) -> TraceCarrier {
-    let mut entries = c.baggage.as_deref().map(labels::parse).unwrap_or_default();
+    let (mut entries, stripped) = c
+        .baggage
+        .as_deref()
+        .map(labels::parse_counted)
+        .unwrap_or_default();
+    if stripped > 0 {
+        emit_baggage_dropped(stripped);
+        return c.clone();
+    }
     let replaced = match entries.iter_mut().find(|(k, _)| k == key) {
         Some(entry) => {
             entry.1 = value.to_owned();
@@ -192,13 +203,19 @@ pub fn with_label(c: &TraceCarrier, key: &str, value: &str) -> TraceCarrier {
 }
 
 /// `c` without label `key`. A carrier whose baggage does not have the key is
-/// returned unchanged; otherwise the baggage is rewritten from its valid
-/// entries without it, and is `None` when none are left.
+/// returned unchanged; otherwise the baggage is rewritten without it, and is
+/// `None` when none are left. A header that is over 8192 bytes or has
+/// malformed or reserved entries is returned unchanged, and
+/// `concord.trace.baggage_dropped` is recorded.
 pub fn without_label(c: &TraceCarrier, key: &str) -> TraceCarrier {
     let Some(header) = c.baggage.as_deref() else {
         return c.clone();
     };
-    let mut entries = labels::parse(header);
+    let (mut entries, stripped) = labels::parse_counted(header);
+    if stripped > 0 {
+        emit_baggage_dropped(stripped);
+        return c.clone();
+    }
     let before = entries.len();
     entries.retain(|(k, _)| k != key);
     if entries.len() == before {
