@@ -1,3 +1,5 @@
+extern crate self as concord_telemetry;
+
 #[cfg(feature = "otel")]
 mod baggage;
 pub mod carrier;
@@ -11,6 +13,7 @@ mod init_failure;
 #[cfg(feature = "otel")]
 mod label_collapse;
 pub mod labels;
+pub mod lifecycle;
 mod location;
 mod logfmt;
 mod panic;

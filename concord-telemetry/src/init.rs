@@ -17,7 +17,6 @@ use opentelemetry_sdk::{
     trace::{BatchSpanProcessor, SdkTracerProvider},
     Resource,
 };
-#[cfg(feature = "otel")]
 use std::hash::{BuildHasher, Hasher};
 use std::{fs::OpenOptions, io::IsTerminal, path::PathBuf, sync::Mutex, time::Duration};
 use tracing_subscriber::{
@@ -270,9 +269,10 @@ fn hostname() -> Option<String> {
 }
 
 #[cfg(feature = "otel")]
-fn resource(config: &Config) -> Resource {
+fn resource(config: &Config, instance_id: &str) -> Resource {
     resource_with(
         config,
+        instance_id,
         std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
         hostname(),
     )
@@ -282,7 +282,12 @@ fn resource(config: &Config) -> Resource {
 /// `Config::service_version`; `host.name` is the machine hostname unless the
 /// environment sets it. Other environment attributes are added as they come.
 #[cfg(feature = "otel")]
-fn resource_with(config: &Config, env: Option<&str>, host: Option<String>) -> Resource {
+fn resource_with(
+    config: &Config,
+    instance_id: &str,
+    env: Option<&str>,
+    host: Option<String>,
+) -> Resource {
     let env = env.map(env_attributes).unwrap_or_default();
     let from_env = |key: &str| {
         env.iter()
@@ -297,15 +302,7 @@ fn resource_with(config: &Config, env: Option<&str>, host: Option<String>) -> Re
             "service.version",
             from_env("service.version").unwrap_or_else(|| config.service_version.to_owned()),
         ),
-        KeyValue::new(
-            "service.instance.id",
-            format!(
-                "{:016x}",
-                std::collections::hash_map::RandomState::new()
-                    .build_hasher()
-                    .finish()
-            ),
-        ),
+        KeyValue::new("service.instance.id", instance_id.to_owned()),
     ];
     if let Some(host) = from_env("host.name").or(host) {
         attributes.push(KeyValue::new("host.name", host));
@@ -441,14 +438,14 @@ fn build_exporter<T>(
 
 /// The OTLP log and trace providers, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 #[cfg(feature = "otel")]
-fn exporters(config: &Config) -> Result<Exporters, InitError> {
+fn exporters(config: &Config, instance_id: &str) -> Result<Exporters, InitError> {
     if std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_none() {
         return Ok(Exporters {
             logs: None,
             traces: None,
         });
     }
-    let resource = resource(config);
+    let resource = resource(config, instance_id);
     let log_exporter = build_exporter(|| {
         opentelemetry_otlp::LogExporter::builder()
             .with_http()
@@ -482,7 +479,7 @@ fn exporters(config: &Config) -> Result<Exporters, InitError> {
 
 /// Off build: there are no exporters, and `OTEL_EXPORTER_OTLP_ENDPOINT` is ignored.
 #[cfg(not(feature = "otel"))]
-fn exporters(_config: &Config) -> Result<Exporters, InitError> {
+fn exporters(_config: &Config, _instance_id: &str) -> Result<Exporters, InitError> {
     Ok(Exporters {})
 }
 
@@ -528,13 +525,31 @@ fn install(_exporters: Exporters, config: &Config) -> Result<Guard, InitError> {
     Ok(Guard {})
 }
 
+/// A fresh 16-hex-digit instance id; the Resource's `service.instance.id`
+/// and the lifecycle events' `source_record_id`.
+fn new_instance_id() -> String {
+    format!(
+        "{:016x}",
+        std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish()
+    )
+}
+
 pub fn init(config: Config) -> Result<Guard, InitError> {
     if tracing::dispatcher::has_been_set() {
         return Err(InitError::AlreadyInitialized);
     }
     let unknown_error_text = crate::error::set_error_text_from_env();
-    let exporters = exporters(&config)?;
+    let instance_id = new_instance_id();
+    let exporters = exporters(&config, &instance_id)?;
     let guard = install(exporters, &config)?;
+    crate::lifecycle::set_identity(crate::lifecycle::Identity {
+        service: config.service_name.to_owned(),
+        version: config.service_version.to_owned(),
+        instance_id,
+        started: std::time::Instant::now(),
+    });
     if let Some(value) = unknown_error_text.as_deref() {
         crate::error::warn_unknown_error_text(value);
     }
@@ -608,6 +623,7 @@ mod resource_tests {
     fn env_values_merge_and_service_version_overrides() {
         let resource = resource_with(
             &config(),
+            "instance",
             Some("service.version=abc123,deployment.environment=prod%2Fblue,host.name=box"),
             Some("machine".into()),
         );
@@ -623,7 +639,7 @@ mod resource_tests {
 
     #[test]
     fn env_unset_keeps_config_values_and_adds_host_name() {
-        let resource = resource_with(&config(), None, Some("machine".into()));
+        let resource = resource_with(&config(), "instance", None, Some("machine".into()));
         assert_eq!(get(&resource, "service.version").as_deref(), Some("1.2.3"));
         assert_eq!(get(&resource, "host.name").as_deref(), Some("machine"));
         assert_eq!(get(&resource, "service.name").as_deref(), Some("svc"));
@@ -634,6 +650,7 @@ mod resource_tests {
     fn malformed_entries_are_skipped_not_fatal() {
         let resource = resource_with(
             &config(),
+            "instance",
             Some("novalue,=nokey,bad=%zz,bad2=%4,bad3=%ff,,good=yes, spaced = v "),
             None,
         );
@@ -652,7 +669,7 @@ mod resource_tests {
             repository: "grorg",
             revision: "abc123",
         });
-        let resource = resource_with(&built, None, None);
+        let resource = resource_with(&built, "instance", None, None);
         assert_eq!(
             get(&resource, "vcs.repository.name").as_deref(),
             Some("grorg")
@@ -664,6 +681,7 @@ mod resource_tests {
 
         let resource = resource_with(
             &built,
+            "instance",
             Some("vcs.repository.name=other,vcs.ref.head.revision=fff"),
             None,
         );
@@ -677,24 +695,27 @@ mod resource_tests {
         );
 
         // Empty env values are ignored; empty build info omits the keys.
-        let resource = resource_with(&built, Some("vcs.repository.name="), None);
+        let resource = resource_with(&built, "instance", Some("vcs.repository.name="), None);
         assert_eq!(
             get(&resource, "vcs.repository.name").as_deref(),
             Some("grorg")
         );
-        let resource = resource_with(&config(), None, None);
+        let resource = resource_with(&config(), "instance", None, None);
         assert_eq!(get(&resource, "vcs.repository.name"), None);
         assert_eq!(get(&resource, "vcs.ref.head.revision"), None);
         let empty = config().with_build_info(BuildInfo::default());
         assert_eq!(
-            get(&resource_with(&empty, None, None), "vcs.repository.name"),
+            get(
+                &resource_with(&empty, "instance", None, None),
+                "vcs.repository.name"
+            ),
             None
         );
     }
 
     #[test]
     fn percent_escapes_need_exactly_two_hex_digits() {
-        let resource = resource_with(&config(), Some("a=%+1,b=%-1,c=%41,d=%4"), None);
+        let resource = resource_with(&config(), "instance", Some("a=%+1,b=%-1,c=%41,d=%4"), None);
         assert_eq!(get(&resource, "a"), None);
         assert_eq!(get(&resource, "b"), None);
         assert_eq!(get(&resource, "c").as_deref(), Some("A"));
@@ -703,9 +724,14 @@ mod resource_tests {
 
     #[test]
     fn empty_service_version_keeps_the_config_value() {
-        let resource = resource_with(&config(), Some("service.version="), Some("m".into()));
+        let resource = resource_with(
+            &config(),
+            "instance",
+            Some("service.version="),
+            Some("m".into()),
+        );
         assert_eq!(get(&resource, "service.version").as_deref(), Some("1.2.3"));
-        let resource = resource_with(&config(), Some("host.name="), Some("m".into()));
+        let resource = resource_with(&config(), "instance", Some("host.name="), Some("m".into()));
         assert_eq!(get(&resource, "host.name").as_deref(), Some("m"));
     }
 
@@ -713,6 +739,7 @@ mod resource_tests {
     fn identity_and_principal_keys_are_not_settable_from_env() {
         let resource = resource_with(
             &config(),
+            "instance",
             Some("service.name=evil,service.instance.id=x,principal.id=y"),
             None,
         );
@@ -725,6 +752,7 @@ mod resource_tests {
     fn environment_name_agent_and_place_are_kept() {
         let resource = resource_with(
             &config(),
+            "instance",
             Some("deployment.environment.name=prod,agent.id=a1,place.id=home"),
             None,
         );
@@ -738,7 +766,12 @@ mod resource_tests {
 
     #[test]
     fn old_environment_key_is_not_translated() {
-        let resource = resource_with(&config(), Some("deployment.environment=prod"), None);
+        let resource = resource_with(
+            &config(),
+            "instance",
+            Some("deployment.environment=prod"),
+            None,
+        );
         assert_eq!(
             get(&resource, "deployment.environment").as_deref(),
             Some("prod")
@@ -750,6 +783,7 @@ mod resource_tests {
     fn reserved_concord_key_in_env_is_skipped() {
         let resource = resource_with(
             &config(),
+            "instance",
             Some("concord.anything=x,concord.trace.missing=y,concordant=ok"),
             None,
         );
@@ -771,6 +805,7 @@ mod resource_tests {
         );
         let resource = resource_with(
             &built,
+            "instance",
             Some("deployment.environment.name=prod,agent.id=a1,place.id=home"),
             Some("machine".into()),
         );
