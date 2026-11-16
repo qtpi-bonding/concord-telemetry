@@ -1,5 +1,7 @@
 use crate::logfmt::{BaggageBridge, BaggageLogProcessor};
 use crate::{AttrValue, Attrs, Event, EVENT_TARGET};
+pub use concord_fields::{label_names, Registry};
+use concord_fields::{FieldVerdict, FREE_TEXT_MAX, LABEL_PREFIX};
 use opentelemetry::logs::AnyValue;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider, SimpleLogProcessor};
@@ -387,4 +389,113 @@ fn string_attr(attrs: &Attrs, name: &str) -> Option<String> {
         Some(AttrValue::Str(value)) => Some(value.clone()),
         _ => None,
     }
+}
+
+/// Keys the tracing layers write on every span, outside the registry.
+const LAYER_KEYS: &[&str] = &["target", "level", "busy_ns", "idle_ns"];
+const LAYER_PREFIXES: &[&str] = &["otel.", "code.", "thread."];
+
+fn library_owned(key: &str) -> bool {
+    LAYER_KEYS.contains(&key)
+        || LAYER_PREFIXES.iter().any(|p| key.starts_with(p))
+        || key.starts_with(LABEL_PREFIX)
+        || key == "concord.label_conflicts"
+}
+
+/// Panics when the attributes of span `span` break the field rules: a key
+/// twice, a key that is neither registered nor written by the tracing layer,
+/// or a `free_text` value longer than `FREE_TEXT_MAX`.
+pub fn check_attributes(registry: &Registry, span: &str, pairs: &[(String, String)]) {
+    for (i, (key, value)) in pairs.iter().enumerate() {
+        if let Some((_, first)) = pairs[..i].iter().find(|(k, _)| k == key) {
+            panic!("span {span:?} has duplicate key {key:?}: {first:?} and {value:?}");
+        }
+        if library_owned(key) {
+            continue;
+        }
+        match registry.check(key) {
+            FieldVerdict::Ok => {}
+            verdict => panic!("span {span:?} has key {key:?} that is not allowed ({verdict:?})"),
+        }
+        if registry.is_free_text(key) && value.len() > FREE_TEXT_MAX {
+            panic!(
+                "span {span:?} free_text key {key:?} is {} bytes, over the cap {FREE_TEXT_MAX}",
+                value.len()
+            );
+        }
+    }
+}
+
+/// The exported spans whose name starts with `prefix`, oldest first, after
+/// `check_attributes` accepted each of them.
+pub fn spans_checked(registry: &Registry, prefix: &str) -> Vec<SpanData> {
+    let spans: Vec<SpanData> = self::spans()
+        .into_iter()
+        .filter(|s| s.name.starts_with(prefix))
+        .collect();
+    for span in &spans {
+        let pairs: Vec<(String, String)> = span
+            .attributes
+            .iter()
+            .map(|kv| (kv.key.to_string(), kv.value.as_str().into_owned()))
+            .collect();
+        check_attributes(registry, &span.name, &pairs);
+    }
+    spans
+}
+
+static TRACE_ENV: Mutex<()> = Mutex::new(());
+
+/// Holds the process-wide trace-environment lock and puts the previous
+/// `TRACEPARENT`/`BAGGAGE` values back when dropped, also while unwinding.
+/// The lock is not reentrant: taking a second guard on the same thread
+/// deadlocks.
+#[must_use = "the environment is restored when the guard drops"]
+pub struct TraceEnvGuard {
+    saved: [(&'static str, Option<std::ffi::OsString>); 2],
+    // Declared last: fields drop after `Drop::drop` has restored the
+    // environment, so the lock is released only then.
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl Drop for TraceEnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in &self.saved {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
+/// Sets the trace environment variables (`None` removes one) under the
+/// process-wide lock, so tests that read them cannot overlap.
+pub fn trace_env(traceparent: Option<&str>, baggage: Option<&str>) -> TraceEnvGuard {
+    use crate::propagation::{BAGGAGE_ENV, TRACEPARENT_ENV};
+    let lock = TRACE_ENV
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = TraceEnvGuard {
+        saved: [TRACEPARENT_ENV, BAGGAGE_ENV].map(|key| (key, std::env::var_os(key))),
+        _lock: lock,
+    };
+    for (key, value) in [(TRACEPARENT_ENV, traceparent), (BAGGAGE_ENV, baggage)] {
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+    guard
+}
+
+/// Runs `f` with the trace environment set, then restores it, also when `f`
+/// panics.
+pub fn with_trace_env<R>(
+    traceparent: Option<&str>,
+    baggage: Option<&str>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let _guard = trace_env(traceparent, baggage);
+    f()
 }

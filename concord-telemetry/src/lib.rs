@@ -28,6 +28,16 @@ pub mod grpc;
 #[cfg(feature = "testing")]
 pub mod testing;
 
+/// `value` cut to at most `FREE_TEXT_MAX` bytes on a char boundary, for
+/// callers that record a `free_text` field.
+pub fn clip(value: &str) -> &str {
+    let mut end = concord_fields::FREE_TEXT_MAX.min(value.len());
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
 pub use carrier::{
     BAGGAGE_DROPPED_CODE, CARRIER_DROPPED_CODE, FIELD_DROPPED_CODE, TRACE_MISSING_CODE,
 };

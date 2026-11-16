@@ -80,7 +80,9 @@ fn without_label_on_none_baggage_is_unchanged() {
 #[cfg(feature = "testing")]
 mod traced {
     use super::*;
-    use concord_telemetry::testing::{capture_exclusive, span_attr, spans, stamp_count};
+    use concord_telemetry::testing::{
+        capture_exclusive, span_attr, spans, stamp_count, with_trace_env,
+    };
     use concord_telemetry::{context, AttrValue};
     use tracing::info_span;
 
@@ -143,39 +145,6 @@ mod traced {
         );
     }
 
-    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// Sets the trace environment for `f` and restores it. A local stand-in:
-    /// the `testing::with_trace_env` helper replaces it.
-    fn with_trace_env_local<R>(
-        traceparent: Option<&str>,
-        baggage: Option<&str>,
-        f: impl FnOnce() -> R,
-    ) -> R {
-        use concord_telemetry::propagation::{BAGGAGE_ENV, TRACEPARENT_ENV};
-        let _lock = ENV.lock().unwrap_or_else(|p| p.into_inner());
-        let saved = [TRACEPARENT_ENV, BAGGAGE_ENV].map(|k| (k, std::env::var_os(k)));
-        for (key, value) in [(TRACEPARENT_ENV, traceparent), (BAGGAGE_ENV, baggage)] {
-            match value {
-                Some(v) => std::env::set_var(key, v),
-                None => std::env::remove_var(key),
-            }
-        }
-        struct Restore([(&'static str, Option<std::ffi::OsString>); 2]);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                for (key, value) in &self.0 {
-                    match value {
-                        Some(v) => std::env::set_var(key, v),
-                        None => std::env::remove_var(key),
-                    }
-                }
-            }
-        }
-        let _restore = Restore(saved);
-        f()
-    }
-
     fn trace_id_of(c: &TraceCarrier) -> String {
         c.traceparent.as_ref().expect("traceparent")[3..35].to_owned()
     }
@@ -190,7 +159,7 @@ mod traced {
         let _c = capture_exclusive();
         let sent = origin_carrier("carrier");
         let env = "00-11111111111111111111111111111111-2222222222222222-01";
-        let again = with_trace_env_local(Some(env), None, || {
+        let again = with_trace_env(Some(env), None, || {
             let span = tracing::Span::none().in_scope(|| info_span!("lh-prefers"));
             carrier::parent_on_or_env(&span, Some(&sent));
             span.in_scope(carrier::capture)
@@ -203,7 +172,7 @@ mod traced {
         let _c = capture_exclusive();
         let env = "00-11111111111111111111111111111111-2222222222222222-01";
         for given in [None, Some(TraceCarrier::default())] {
-            let got = with_trace_env_local(Some(env), None, || {
+            let got = with_trace_env(Some(env), None, || {
                 let span = tracing::Span::none().in_scope(|| info_span!("lh-fallback"));
                 carrier::parent_on_or_env(&span, given.as_ref());
                 span.in_scope(carrier::capture)
