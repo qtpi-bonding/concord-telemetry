@@ -160,13 +160,17 @@ pub fn extract_ingress(_name: &'static str, _span: &Span, _c: &TraceCarrier) {}
 /// `c` with label `key` set to `value`: the entry is replaced in place when
 /// the carrier's baggage has the key, otherwise appended. Everything else in
 /// the carrier is kept; the baggage is rewritten from its entries
-/// (properties are dropped, as `labels::parse` does). A header that is over
-/// 8192 bytes or has malformed or reserved entries would lose them in the
-/// rewrite, so `c` is returned unchanged and `concord.trace.baggage_dropped`
-/// is recorded.
-/// A label that is not valid (empty or over-long key, key in the reserved
-/// `concord.` namespace, value over 256 bytes, a 25th entry, or a header that
-/// would pass its cap) leaves `c` unchanged and records
+/// (properties are dropped, as `labels::parse` does).
+///
+/// Dirty baggage fails closed: when the carrier's baggage has malformed or
+/// reserved entries, or is over 8192 bytes, the existing entries are dropped
+/// and `concord.trace.baggage_dropped` is recorded once with the number
+/// stripped. Only the new label is forwarded: if it is valid the baggage is
+/// the header of that one label alone, otherwise the baggage is `None`.
+///
+/// On clean baggage, a label that is not valid (empty or over-long key, key
+/// in the reserved `concord.` namespace, value over 256 bytes, a 25th entry,
+/// or a header that would pass its cap) leaves `c` unchanged and records
 /// `concord.trace.baggage_dropped`. Pure apart from that record.
 pub fn with_label(c: &TraceCarrier, key: &str, value: &str) -> TraceCarrier {
     let (mut entries, stripped) = c
@@ -176,7 +180,15 @@ pub fn with_label(c: &TraceCarrier, key: &str, value: &str) -> TraceCarrier {
         .unwrap_or_default();
     if stripped > 0 {
         emit_baggage_dropped(stripped);
-        return c.clone();
+        let baggage = if labels::valid(key, value) {
+            labels::format_counted(&[(key.to_owned(), value.to_owned())]).0
+        } else {
+            None
+        };
+        return TraceCarrier {
+            baggage,
+            ..c.clone()
+        };
     }
     let replaced = match entries.iter_mut().find(|(k, _)| k == key) {
         Some(entry) => {
@@ -204,9 +216,12 @@ pub fn with_label(c: &TraceCarrier, key: &str, value: &str) -> TraceCarrier {
 
 /// `c` without label `key`. A carrier whose baggage does not have the key is
 /// returned unchanged; otherwise the baggage is rewritten without it, and is
-/// `None` when none are left. A header that is over 8192 bytes or has
-/// malformed or reserved entries is returned unchanged, and
-/// `concord.trace.baggage_dropped` is recorded.
+/// `None` when none are left.
+///
+/// Dirty baggage fails closed: when the header is over 8192 bytes or has
+/// malformed or reserved entries, the baggage is dropped (`None`), with the
+/// traceparent and other fields kept, and `concord.trace.baggage_dropped` is
+/// recorded with the number stripped. No label crosses.
 pub fn without_label(c: &TraceCarrier, key: &str) -> TraceCarrier {
     let Some(header) = c.baggage.as_deref() else {
         return c.clone();
@@ -214,7 +229,10 @@ pub fn without_label(c: &TraceCarrier, key: &str) -> TraceCarrier {
     let (mut entries, stripped) = labels::parse_counted(header);
     if stripped > 0 {
         emit_baggage_dropped(stripped);
-        return c.clone();
+        return TraceCarrier {
+            baggage: None,
+            ..c.clone()
+        };
     }
     let before = entries.len();
     entries.retain(|(k, _)| k != key);

@@ -117,15 +117,6 @@ mod traced {
             .len()
     }
 
-    fn assert_kept_and_reported(
-        out: &TraceCarrier,
-        c: &TraceCarrier,
-        captured: &concord_telemetry::testing::ExclusiveCapture,
-    ) {
-        assert_eq!(out, c);
-        assert_eq!(dropped_count(captured), 1);
-    }
-
     fn oversize() -> String {
         (0..40)
             .map(|i| format!("k{i}={}", "x".repeat(250)))
@@ -133,32 +124,54 @@ mod traced {
             .join(",")
     }
 
-    #[test]
-    fn with_label_keeps_oversize_or_dirty_baggage_and_reports() {
-        for header in [
+    fn dirty_headers(extra: &str) -> Vec<String> {
+        vec![
             oversize(),
-            "a=1,bad".to_owned(),
-            "a=1,concord.x=2".to_owned(),
-        ] {
+            format!("a=1,{extra},bad"),
+            format!("a=1,{extra},concord.x=2"),
+        ]
+    }
+
+    #[test]
+    fn with_label_on_dirty_or_oversize_baggage_forwards_only_the_new_label() {
+        for header in dirty_headers("b=2") {
             let captured = capture_exclusive();
             let c = with_baggage(&header);
-            let out = carrier::with_label(&c, "b", "2");
-            assert_kept_and_reported(&out, &c, &captured);
+            let out = carrier::with_label(&c, "b", "9");
+            assert_eq!(out.baggage.as_deref(), Some("b=9"), "{header}");
+            assert_eq!(out.traceparent, c.traceparent);
+            assert_eq!(dropped_count(&captured), 1);
         }
     }
 
     #[test]
-    fn without_label_keeps_oversize_or_dirty_baggage_and_reports() {
-        for header in [
-            oversize(),
-            "a=1,b=2,bad".to_owned(),
-            "a=1,b=2,concord.x=2".to_owned(),
-        ] {
+    fn with_label_invalid_value_on_dirty_baggage_forwards_no_baggage() {
+        let captured = capture_exclusive();
+        let c = with_baggage("a=1,bad");
+        let out = carrier::with_label(&c, "b", &"x".repeat(257));
+        assert_eq!(out.baggage, None);
+        assert_eq!(out.traceparent, c.traceparent);
+        assert_eq!(dropped_count(&captured), 1);
+    }
+
+    #[test]
+    fn without_label_on_dirty_or_oversize_baggage_drops_the_baggage() {
+        for header in dirty_headers("b=2") {
             let captured = capture_exclusive();
             let c = with_baggage(&header);
             let out = carrier::without_label(&c, "b");
-            assert_kept_and_reported(&out, &c, &captured);
+            assert_eq!(out.baggage, None, "{header}");
+            assert_eq!(out.traceparent, c.traceparent);
+            assert_eq!(dropped_count(&captured), 1);
         }
+    }
+
+    #[test]
+    fn with_label_on_clean_header_does_not_report() {
+        let captured = capture_exclusive();
+        let out = carrier::with_label(&with_baggage("a=1"), "b", "2");
+        assert_eq!(out.baggage.as_deref(), Some("a=1,b=2"));
+        assert_eq!(dropped_count(&captured), 0);
     }
 
     #[test]
