@@ -66,6 +66,11 @@ concord-lint 0.2.0. Pin all four at the same revision.
   `bool`. A `repeated` field is emitted as a string, so it is accepted only on
   a `str` name and rejected on an `int` name. Messages such as `Timestamp`,
   `Duration` and `Principal` are not checked.
+- `carrier::parent_on_or_env` fails closed on dirty baggage, from the carrier or
+  the `BAGGAGE` environment variable, as `with_label` and `without_label` do:
+  a header with malformed or reserved entries, or over 8192 bytes, adopts no
+  labels (the trace is still continued) and records
+  `concord.trace.baggage_dropped` once. Clean baggage is adopted as before.
 
 ### Breaking changes
 

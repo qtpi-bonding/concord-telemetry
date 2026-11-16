@@ -249,11 +249,36 @@ pub fn without_label(c: &TraceCarrier, key: &str) -> TraceCarrier {
 /// `TRACEPARENT` and `BAGGAGE` environment variables. A carrier with a
 /// `traceparent` wins even when the environment has one. Call it before
 /// `span` is first entered; without the `otel` feature it does nothing.
+///
+/// Fails closed on dirty baggage, from the carrier or the environment: when
+/// the header has malformed or reserved entries, or is over 8192 bytes, none
+/// of its labels is adopted (the trace is still continued) and
+/// `concord.trace.baggage_dropped` is recorded once with the number stripped.
 pub fn parent_on_or_env(span: &Span, c: Option<&TraceCarrier>) {
+    use crate::propagation::{BAGGAGE_ENV, TRACEPARENT_ENV};
     match c.filter(|c| c.traceparent.as_deref().is_some_and(|t| !t.is_empty())) {
-        Some(c) => parent_on(span, c),
-        None => crate::propagation::set_parent_from_env(span),
+        Some(c) => {
+            let mut clean = c.clone();
+            clean.baggage = clean.baggage.and_then(refuse_dirty);
+            parent_on(span, &clean);
+        }
+        None => crate::propagation::set_parent(span, |key| match key {
+            "traceparent" => std::env::var(TRACEPARENT_ENV).ok(),
+            "baggage" => std::env::var(BAGGAGE_ENV).ok().and_then(refuse_dirty),
+            _ => None,
+        }),
     }
+}
+
+/// `header` as is when it is clean, otherwise `None` after recording the
+/// number of entries stripped.
+fn refuse_dirty(header: String) -> Option<String> {
+    let (_, stripped) = labels::parse_counted(&header);
+    if stripped > 0 {
+        emit_baggage_dropped(stripped);
+        return None;
+    }
+    Some(header)
 }
 
 /// A span with no parent: it starts a trace of its own.

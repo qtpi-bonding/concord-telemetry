@@ -265,4 +265,46 @@ mod traced {
             assert_eq!(trace_id_of(&got), "11111111111111111111111111111111");
         }
     }
+
+    fn adopted_labels(
+        carrier_in: Option<&TraceCarrier>,
+        env_baggage: Option<&str>,
+    ) -> Option<String> {
+        let env = "00-11111111111111111111111111111111-2222222222222222-01";
+        with_trace_env(Some(env), env_baggage, || {
+            let span = tracing::Span::none().in_scope(|| info_span!("lh-sanitise"));
+            carrier::parent_on_or_env(&span, carrier_in);
+            span.in_scope(carrier::capture).baggage
+        })
+    }
+
+    #[test]
+    fn parent_on_or_env_does_not_adopt_dirty_env_baggage() {
+        for header in dirty_headers("b=2") {
+            let captured = capture_exclusive();
+            let got = adopted_labels(None, Some(&header));
+            assert_eq!(got, None, "{header}");
+            assert_eq!(dropped_count(&captured), 1, "{header}");
+        }
+    }
+
+    #[test]
+    fn parent_on_or_env_does_not_adopt_dirty_carrier_baggage() {
+        for header in dirty_headers("b=2") {
+            let captured = capture_exclusive();
+            let got = adopted_labels(Some(&with_baggage(&header)), None);
+            assert_eq!(got, None, "{header}");
+            assert_eq!(dropped_count(&captured), 1, "{header}");
+        }
+    }
+
+    #[test]
+    fn parent_on_or_env_adopts_clean_baggage() {
+        let captured = capture_exclusive();
+        let from_env = adopted_labels(None, Some("a=1,b=2"));
+        assert_eq!(from_env.as_deref(), Some("a=1,b=2"));
+        let from_carrier = adopted_labels(Some(&with_baggage("c=3")), Some("a=1"));
+        assert_eq!(from_carrier.as_deref(), Some("c=3"));
+        assert_eq!(dropped_count(&captured), 0);
+    }
 }
