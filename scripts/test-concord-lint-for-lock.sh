@@ -134,4 +134,13 @@ version = "0.1.0"
 source = "git+https://github.com/qtpi-bonding/concord-telemetry.git?rev=$REV#$REV"
 L
 [ "$("$script" "$work/Cargo.lock")" = "$REV" ] || fail "same rev twice should pass"
+
+# --path prints the binary path (installing when missing); the default prints the rev.
+lock "source = \"git+https://github.com/qtpi-bonding/concord-telemetry.git?rev=$REV#$REV\""
+rm -rf "$HOME/.cache/concord-lint"
+out="$("$script" --path "$work/Cargo.lock")"
+[ "$out" = "$HOME/.cache/concord-lint/$REV/bin/concord-lint" ] || fail "--path printed '$out'"
+[ -x "$out" ] || fail "--path binary missing"
+"$script" --path "$work/missing.lock" 2>/dev/null && fail "--path with missing lock must fail"
+[ "$("$script" "$work/Cargo.lock")" = "$REV" ] || fail "no flag no longer prints the rev"
 echo "concord-lint-for-lock: ok"
