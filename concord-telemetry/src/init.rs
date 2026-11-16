@@ -268,20 +268,39 @@ fn hostname() -> Option<String> {
     }
 }
 
+/// The `OTEL_RESOURCE_ATTRIBUTES` of the process, parsed.
 #[cfg(feature = "otel")]
-fn resource(config: &Config, instance_id: &str) -> Resource {
-    resource_with(
-        config,
-        instance_id,
-        std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
-        hostname(),
-    )
+fn env_resource_attributes() -> Vec<(String, String)> {
+    std::env::var("OTEL_RESOURCE_ATTRIBUTES")
+        .ok()
+        .as_deref()
+        .map(env_attributes)
+        .unwrap_or_default()
+}
+
+/// The value of `key` in the parsed environment attributes (last wins), when
+/// not empty.
+#[cfg(feature = "otel")]
+fn env_value(env: &[(String, String)], key: &str) -> Option<String> {
+    env.iter()
+        .rev()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value.clone())
+        .filter(|value| !value.is_empty())
+}
+
+/// The service version in effect: `service.version` from
+/// `OTEL_RESOURCE_ATTRIBUTES` overrides `Config::service_version`. `init`
+/// computes it once for the Resource and the lifecycle identity.
+#[cfg(feature = "otel")]
+fn effective_version(config: &Config, env: &[(String, String)]) -> String {
+    env_value(env, "service.version").unwrap_or_else(|| config.service_version.to_owned())
 }
 
 /// `service.version` from `OTEL_RESOURCE_ATTRIBUTES` overrides
 /// `Config::service_version`; `host.name` is the machine hostname unless the
 /// environment sets it. Other environment attributes are added as they come.
-#[cfg(feature = "otel")]
+#[cfg(all(test, feature = "otel"))]
 fn resource_with(
     config: &Config,
     instance_id: &str,
@@ -289,19 +308,24 @@ fn resource_with(
     host: Option<String>,
 ) -> Resource {
     let env = env.map(env_attributes).unwrap_or_default();
-    let from_env = |key: &str| {
-        env.iter()
-            .rev()
-            .find(|(name, _)| name == key)
-            .map(|(_, value)| value.clone())
-            .filter(|value| !value.is_empty())
-    };
+    let version = effective_version(config, &env);
+    resource_for(config, &version, instance_id, &env, host)
+}
+
+/// The Resource for `config` with the already-computed `version` and parsed
+/// environment attributes.
+#[cfg(feature = "otel")]
+fn resource_for(
+    config: &Config,
+    version: &str,
+    instance_id: &str,
+    env: &[(String, String)],
+    host: Option<String>,
+) -> Resource {
+    let from_env = |key: &str| env_value(env, key);
     let mut attributes = vec![
         KeyValue::new("service.name", config.service_name),
-        KeyValue::new(
-            "service.version",
-            from_env("service.version").unwrap_or_else(|| config.service_version.to_owned()),
-        ),
+        KeyValue::new("service.version", version.to_owned()),
         KeyValue::new("service.instance.id", instance_id.to_owned()),
     ];
     if let Some(host) = from_env("host.name").or(host) {
@@ -319,7 +343,7 @@ fn resource_with(
         attributes.push(KeyValue::new("vcs.ref.head.revision", revision));
     }
     let mut extra: Vec<(String, String)> = Vec::new();
-    for (key, value) in &env {
+    for (key, value) in env {
         if !matches!(
             key.as_str(),
             "service.version" | "host.name" | "vcs.repository.name" | "vcs.ref.head.revision"
@@ -438,14 +462,19 @@ fn build_exporter<T>(
 
 /// The OTLP log and trace providers, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 #[cfg(feature = "otel")]
-fn exporters(config: &Config, instance_id: &str) -> Result<Exporters, InitError> {
+fn exporters(
+    config: &Config,
+    version: &str,
+    env: &[(String, String)],
+    instance_id: &str,
+) -> Result<Exporters, InitError> {
     if std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_none() {
         return Ok(Exporters {
             logs: None,
             traces: None,
         });
     }
-    let resource = resource(config, instance_id);
+    let resource = resource_for(config, version, instance_id, env, hostname());
     let log_exporter = build_exporter(|| {
         opentelemetry_otlp::LogExporter::builder()
             .with_http()
@@ -542,11 +571,22 @@ pub fn init(config: Config) -> Result<Guard, InitError> {
     }
     let unknown_error_text = crate::error::set_error_text_from_env();
     let instance_id = new_instance_id();
-    let exporters = exporters(&config, &instance_id)?;
+    #[cfg(feature = "otel")]
+    let (version, exporters) = {
+        let env = env_resource_attributes();
+        let version = effective_version(&config, &env);
+        let exporters = exporters(&config, &version, &env, &instance_id)?;
+        (version, exporters)
+    };
+    #[cfg(not(feature = "otel"))]
+    let (version, exporters) = (
+        config.service_version.to_owned(),
+        exporters(&config, &instance_id)?,
+    );
     let guard = install(exporters, &config)?;
     crate::lifecycle::set_identity(crate::lifecycle::Identity {
         service: config.service_name.to_owned(),
-        version: config.service_version.to_owned(),
+        version,
         instance_id,
         started: std::time::Instant::now(),
     });
