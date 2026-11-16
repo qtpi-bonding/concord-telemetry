@@ -25,7 +25,10 @@ fn version_reads_the_callers_build_environment() {
 
 #[test]
 fn repo_pick_handles_set_unset_and_empty() {
-    assert_eq!(concord_telemetry::repo!(@pick Some("grorg")), "grorg");
+    assert_eq!(
+        concord_telemetry::repo!(@pick Some("my-service")),
+        "my-service"
+    );
     assert_eq!(concord_telemetry::repo!(@pick None::<&str>), "");
     assert_eq!(concord_telemetry::repo!(@pick Some("")), "");
 }

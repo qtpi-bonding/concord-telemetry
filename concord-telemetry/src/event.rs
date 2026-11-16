@@ -69,7 +69,7 @@ macro_rules! version {
 }
 
 /// The caller's `CONCORD_GIT_REPO` build-time environment variable (the repo
-/// the binary is built from, e.g. `grorg`), else the empty string. Read when
+/// the binary is built from, e.g. `my-service`), else the empty string. Read when
 /// the *caller's* crate compiles.
 #[macro_export]
 macro_rules! repo {

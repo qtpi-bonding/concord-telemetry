@@ -466,7 +466,7 @@ fn rebuild_field(
             quote!(Duration)
         };
         let parse = quote!(<::concord_telemetry::__private::prost_types::#proto as ::std::str::FromStr>::from_str(v).map_err(|_| ::concord_telemetry::RebuildError::Parse(#key.to_string()))?);
-        let value = quote!({ let t = match #get { ::concord_telemetry::AttrValue::Str(v) => #parse, _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())) }; #[allow(clippy::needless_update)] #base { seconds: t.seconds, nanos: t.nanos, ..<#base as ::core::default::Default>::default() } });
+        let value = quote!({ let t = match #get { ::concord_telemetry::AttrValue::Str(v) => #parse, _ => return Err(::concord_telemetry::RebuildError::Type(#key.to_string())) }; /* the struct update is needed for messages with more fields than seconds/nanos */ #[allow(clippy::needless_update)] #base { seconds: t.seconds, nanos: t.nanos, ..<#base as ::core::default::Default>::default() } });
         return Ok(
             quote!(#id: if attrs.contains_key(#key) { ::core::option::Option::Some(#value) } else { ::core::option::Option::None }),
         );

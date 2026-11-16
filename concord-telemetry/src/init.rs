@@ -706,13 +706,13 @@ mod resource_tests {
     #[test]
     fn build_info_sets_vcs_keys_unless_empty_and_env_overrides() {
         let built = config().with_build_info(BuildInfo {
-            repository: "grorg",
+            repository: "my-service",
             revision: "abc123",
         });
         let resource = resource_with(&built, "instance", None, None);
         assert_eq!(
             get(&resource, "vcs.repository.name").as_deref(),
-            Some("grorg")
+            Some("my-service")
         );
         assert_eq!(
             get(&resource, "vcs.ref.head.revision").as_deref(),
@@ -738,7 +738,7 @@ mod resource_tests {
         let resource = resource_with(&built, "instance", Some("vcs.repository.name="), None);
         assert_eq!(
             get(&resource, "vcs.repository.name").as_deref(),
-            Some("grorg")
+            Some("my-service")
         );
         let resource = resource_with(&config(), "instance", None, None);
         assert_eq!(get(&resource, "vcs.repository.name"), None);

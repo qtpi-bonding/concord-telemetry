@@ -36,8 +36,8 @@ concord-lint 0.2.0. Pin all four at the same revision.
 - `RESOURCE_KEYS`: `service.name`, `service.version`, `service.instance.id`,
   `host.name`, `vcs.repository.name`, `vcs.ref.head.revision`,
   `deployment.environment.name`, `agent.id`, `place.id`, `principal.kind`,
-  `principal.id`, `principal.verified_by`, `principal.via`. The last three
-  non-principal keys are set through `OTEL_RESOURCE_ATTRIBUTES` only. A key
+  `principal.id`, `principal.verified_by`, `principal.via`. `deployment.environment.name`,
+  `agent.id` and `place.id` are set through `OTEL_RESOURCE_ATTRIBUTES` only. A key
   starting `concord.` there is skipped; the old `deployment.environment` is
   passed through as written, never translated.
 - `fields.toml`: every entry has a `type` (`str`, `int`, `float`, `bool`); fields

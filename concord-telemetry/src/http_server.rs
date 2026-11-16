@@ -6,8 +6,7 @@
 //! the request's extensions, which renames the span `{method} {route}` and sets
 //! `http.route`. `http.response.status_code` is recorded when the response
 //! future is ready. `rpc.grpc.status_code` is not recorded: it lives in
-//! trailers, which needs a body wrapper (see concordium's
-//! `docs/concord-telemetry-deferred.md`).
+//! trailers, which needs a body wrapper (not implemented).
 
 use crate::{carrier, init::HTTP_TARGET, TraceCarrier};
 use pin_project_lite::pin_project;
