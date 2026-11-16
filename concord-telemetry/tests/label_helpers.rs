@@ -47,14 +47,14 @@ fn format_round_trips() {
 #[test]
 fn encode_is_w3c_strict_and_round_trips() {
     let key = "k()<>@:/[]{}?\\\"";
-    let value = "x\\y, z;\"q\"%\u{e9}";
+    let value = "x\\y, z=;\"q\"%\u{e9}";
     let header = labels::format(&pairs(&[(key, value)])).expect("header");
     let (k, v) = header.split_once('=').expect("pair");
     let token = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
     assert!(k.bytes().all(token), "key not a token: {k}");
     let octet = |b: u8| matches!(b, 0x21 | 0x23..=0x2B | 0x2D..=0x3A | 0x3C..=0x5B | 0x5D..=0x7E);
     assert!(v.bytes().all(octet), "value not baggage-octet: {v}");
-    assert!(v.starts_with("x%5Cy%2C%20z%3B%22q%22%25"), "{v}");
+    assert!(v.starts_with("x%5Cy%2C%20z%3D%3B%22q%22%25"), "{v}");
     assert_eq!(labels::parse(&header), pairs(&[(key, value)]));
 }
 
