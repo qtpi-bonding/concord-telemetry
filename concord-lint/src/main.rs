@@ -49,7 +49,13 @@ fn run(args: Vec<String>) -> Result<u8, String> {
     let mut registry = Registry::shared();
     if let Some(path) = local {
         let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-        registry = registry.with_local(&text).map_err(|e| e.to_string())?;
+        registry = match registry.with_local(&text) {
+            Ok(registry) => registry,
+            Err(error) => {
+                eprintln!("concord-lint: {error}");
+                return Ok(2);
+            }
+        };
     }
     let mut violations = Vec::new();
     for path in paths {

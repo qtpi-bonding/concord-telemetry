@@ -455,7 +455,7 @@ fn fully_qualified_event_macro_is_checked() {
 fn comparison_operator_does_not_split_fields() {
     let rules = scan(
         "src/lib.rs",
-        "use tracing::info; fn f(a: u8, b: u8) { info!(count = if a < b { 1 } else { 2 }, action_id = 3, \"x\"); }",
+        "use tracing::info; fn f(a: u8, b: u8) { info!(widget = if a < b { 1 } else { 2 }, action_id = 3, \"x\"); }",
     );
     assert_eq!(rules, vec!["unregistered-field"]);
 

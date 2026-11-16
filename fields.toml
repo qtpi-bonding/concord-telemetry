@@ -2,20 +2,20 @@
 # label = true: the field is a baggage label (carried across spans and processes, stamped
 # as concord.label.<name>); it must not be recorded through Debug.
 [fields]
-action_id = { type = "str", meaning = "grorg Action id", label = true }
-session_id = { type = "str", meaning = "grorg Session id", label = true }
+action_id = { type = "str", meaning = "Action id", label = true }
+session_id = { type = "str", meaning = "Id of the Session the work belongs to", label = true }
 elapsed_ms = { type = "int", meaning = "Elapsed wall time in milliseconds" }
 agent_id = { type = "str", meaning = "Agent principal id (opaque string)", label = true }
-delivery_id = { type = "str", meaning = "multimatrix delivery id; stable across resends", label = true }
-room_id = { type = "str", meaning = "multimatrix room id" }
+delivery_id = { type = "str", meaning = "Delivery id; stable across resends", label = true }
+room_id = { type = "str", meaning = "Room id" }
 message_id = { type = "str", meaning = "Room message id", label = true }
 machine_id = { type = "str", meaning = "Machine id", label = true }
 offline_machine_id = { type = "str", meaning = "Machine id that went offline" }
 batch_sequence = { type = "int", meaning = "Mailbox batch sequence number" }
 context = { type = "str", meaning = "Short fixed label for where a log comes from" }
-node_id = { type = "str", meaning = "archegraph DAG node id" }
-build_id = { type = "str", meaning = "archegraph build id" }
-blueprint_name = { type = "str", meaning = "archegraph Blueprint name" }
+node_id = { type = "str", meaning = "Id of a graph node" }
+build_id = { type = "str", meaning = "Id of a build" }
+blueprint_name = { type = "str", meaning = "Name of a Blueprint" }
 turn_id = { type = "str", meaning = "Id of one agent turn", label = true }
 request_id = { type = "str", meaning = "Id of one request", label = true }
 header = { type = "str", meaning = "Name of a carrier header that was dropped" }
@@ -27,12 +27,47 @@ instance_id = { type = "str", meaning = "Instance id", label = true }
 label = { type = "str", meaning = "Short fixed label" }
 error = { type = "str", meaning = "Display of an error, local debug logs only (rule 5)" }
 source_record_id = { type = "str", meaning = "Id of the record an event describes" }
-"error.type" = { type = "str", meaning = "OTel semconv: error type" }
+"error.type" = { type = "str", meaning = "OTel semconv error.type on a client span; set to the error code" }
 "rpc.method" = { type = "str", meaning = "OTel semconv: RPC method" }
 "http.request.method" = { type = "str", meaning = "OTel semconv: HTTP method" }
 "code.file.path" = { type = "str", meaning = "OTel semconv: source file; added to every exported log record and span, never set by hand" }
 "code.line.number" = { type = "str", meaning = "OTel semconv: source line; added to every exported log record and span, never set by hand" }
 "code.module.name" = { type = "str", meaning = "OTel semconv: module path; added to every exported log record and span, never set by hand" }
+"error.code" = { type = "str", meaning = "Stable code of an error" }
+"error.class" = { type = "str", meaning = "Class of an error" }
+"error.fingerprint" = { type = "str", meaning = "Fingerprint that groups equal errors" }
+"error.source" = { type = "str", meaning = "Source of an error, as a short fixed word" }
+ingress = { type = "str", meaning = "Name of the entry point a trace started at" }
+service = { type = "str", meaning = "Name of the service a record is about" }
+version = { type = "str", meaning = "Version of the service a record is about" }
+uptime_ms = { type = "int", meaning = "Milliseconds the service has been up" }
+target_session_id = { type = "str", meaning = "Id of the Session an operation is about; differs from the session_id label when acting on another" }
+acp_session_id = { type = "str", meaning = "Session id held with an ACP agent; apart from the upstream session id" }
+outcome = { type = "str", meaning = "Short label for how an operation ended" }
+ok = { type = "bool", meaning = "The operation succeeded" }
+count = { type = "int", meaning = "Number of items" }
+reason = { type = "str", meaning = "Short fixed reason a decision was made or an operation refused" }
+kind = { type = "str", meaning = "Fixed label for the kind of thing" }
+command = { type = "str", meaning = "Program or command line an operation runs; never its environment", free_text = true }
+listen = { type = "str", meaning = "Address a listener binds" }
+attempt = { type = "int", meaning = "Attempt number of a retried operation" }
+attempts = { type = "int", meaning = "Attempts made" }
+cause = { type = "str", meaning = "What triggered an operation or re-derivation" }
+status = { type = "str", meaning = "Status of the thing a record is about, as a short fixed word" }
+node = { type = "str", meaning = "Id of a graph or transcript node" }
+nodes = { type = "int", meaning = "Number of nodes" }
+principal = { type = "str", meaning = "Principal id" }
+file = { type = "str", meaning = "A file an operation touched" }
+path = { type = "str", meaning = "Filesystem path an operation touched" }
+target = { type = "str", meaning = "What an operation is aimed at" }
+target_machine_id = { type = "str", meaning = "Id of the machine an operation is aimed at" }
+skipped = { type = "bool", meaning = "The operation did nothing" }
+skipped_count = { type = "int", meaning = "Number of items skipped" }
+cwd = { type = "str", meaning = "Working directory" }
+pid = { type = "int", meaning = "Process id" }
+key_id = { type = "str", meaning = "Key thumbprint" }
+message_count = { type = "int", meaning = "Number of messages" }
+error_code = { type = "str", meaning = "Stable code of an error carried on an event" }
 
 [never]
 names = ["content", "body", "stdout", "stderr", "prompt", "env", "password", "token", "secret"]
