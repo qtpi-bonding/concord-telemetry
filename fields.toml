@@ -10,7 +10,7 @@ delivery_id = { type = "str", meaning = "Delivery id; stable across resends", la
 room_id = { type = "str", meaning = "Room id" }
 message_id = { type = "str", meaning = "Room message id", label = true }
 place_id = { type = "str", meaning = "Place id", label = true }
-daemon_id = { type = "str", meaning = "Daemon id" }
+daemon_id = { type = "str", meaning = "Daemon id", label = true }
 batch_sequence = { type = "int", meaning = "Mailbox batch sequence number" }
 context = { type = "str", meaning = "Short fixed label for where a log comes from" }
 node_id = { type = "str", meaning = "Id of a graph node" }

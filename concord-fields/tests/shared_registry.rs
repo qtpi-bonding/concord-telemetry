@@ -130,6 +130,7 @@ fn labels_unchanged() {
         [
             "action_id",
             "agent_id",
+            "daemon_id",
             "delivery_id",
             "instance_id",
             "message_id",
@@ -139,7 +140,7 @@ fn labels_unchanged() {
             "turn_id"
         ]
     );
-    assert_eq!(Registry::shared().label_names().len(), 9);
+    assert_eq!(Registry::shared().label_names().len(), 10);
 }
 
 #[test]
@@ -147,7 +148,7 @@ fn machine_names_are_gone_place_and_daemon_are_registered() {
     let parsed = shared();
     assert!(parsed.names["place_id"].label);
     assert_eq!(parsed.names["place_id"].ty, FieldType::Str);
-    assert!(!parsed.names["daemon_id"].label);
+    assert!(parsed.names["daemon_id"].label);
     assert_eq!(parsed.names["daemon_id"].ty, FieldType::Str);
     assert!(!parsed.names["target_daemon_id"].label);
     for name in ["machine_id", "offline_machine_id", "target_machine_id"] {

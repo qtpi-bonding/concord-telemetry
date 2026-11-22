@@ -9,7 +9,7 @@ concord-lint keep their versions; pin all four at the same revision).
 
 - Registry names follow the place/daemon rename: `machine_id` (a label) is now
   `place_id`, `target_machine_id` is now `target_daemon_id`, and `daemon_id` is
-  new.
+  new and a label (baggage key `concord.label.daemon_id`).
 - `offline_machine_id` is removed: nothing emitted it.
 
 ### Migration

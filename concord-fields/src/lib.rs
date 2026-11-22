@@ -232,6 +232,7 @@ mod tests {
         for name in [
             "action_id",
             "agent_id",
+            "daemon_id",
             "session_id",
             "turn_id",
             "delivery_id",

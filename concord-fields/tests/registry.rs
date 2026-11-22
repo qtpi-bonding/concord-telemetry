@@ -105,10 +105,11 @@ fn free_text_flag_read() {
 }
 
 #[test]
-fn label_names_are_the_nine_labels_sorted() {
+fn label_names_are_the_ten_labels_sorted() {
     let expected = [
         "action_id",
         "agent_id",
+        "daemon_id",
         "delivery_id",
         "instance_id",
         "message_id",
