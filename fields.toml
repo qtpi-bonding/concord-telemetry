@@ -9,8 +9,8 @@ agent_id = { type = "str", meaning = "Agent principal id (opaque string)", label
 delivery_id = { type = "str", meaning = "Delivery id; stable across resends", label = true }
 room_id = { type = "str", meaning = "Room id" }
 message_id = { type = "str", meaning = "Room message id", label = true }
-machine_id = { type = "str", meaning = "Machine id", label = true }
-offline_machine_id = { type = "str", meaning = "Machine id that went offline" }
+place_id = { type = "str", meaning = "Place id", label = true }
+daemon_id = { type = "str", meaning = "Daemon id" }
 batch_sequence = { type = "int", meaning = "Mailbox batch sequence number" }
 context = { type = "str", meaning = "Short fixed label for where a log comes from" }
 node_id = { type = "str", meaning = "Id of a graph node" }
@@ -60,7 +60,7 @@ principal = { type = "str", meaning = "Principal id" }
 file = { type = "str", meaning = "A file an operation touched" }
 path = { type = "str", meaning = "Filesystem path an operation touched" }
 target = { type = "str", meaning = "What an operation is aimed at" }
-target_machine_id = { type = "str", meaning = "Id of the machine an operation is aimed at" }
+target_daemon_id = { type = "str", meaning = "Id of the daemon an operation is aimed at" }
 skipped = { type = "bool", meaning = "The operation did nothing" }
 skipped_count = { type = "int", meaning = "Number of items skipped" }
 cwd = { type = "str", meaning = "Working directory" }

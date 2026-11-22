@@ -238,7 +238,7 @@ mod tests {
             "request_id",
             "message_id",
             "instance_id",
-            "machine_id",
+            "place_id",
         ] {
             assert!(shared.names[name].label, "{name}");
         }

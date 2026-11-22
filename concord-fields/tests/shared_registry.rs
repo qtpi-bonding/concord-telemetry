@@ -44,7 +44,7 @@ fn promoted_names_present_once() {
         ("file", FieldType::Str),
         ("path", FieldType::Str),
         ("target", FieldType::Str),
-        ("target_machine_id", FieldType::Str),
+        ("target_daemon_id", FieldType::Str),
         ("skipped", FieldType::Bool),
         ("skipped_count", FieldType::Int),
         ("cwd", FieldType::Str),
@@ -132,12 +132,25 @@ fn labels_unchanged() {
             "agent_id",
             "delivery_id",
             "instance_id",
-            "machine_id",
             "message_id",
+            "place_id",
             "request_id",
             "session_id",
             "turn_id"
         ]
     );
     assert_eq!(Registry::shared().label_names().len(), 9);
+}
+
+#[test]
+fn machine_names_are_gone_place_and_daemon_are_registered() {
+    let parsed = shared();
+    assert!(parsed.names["place_id"].label);
+    assert_eq!(parsed.names["place_id"].ty, FieldType::Str);
+    assert!(!parsed.names["daemon_id"].label);
+    assert_eq!(parsed.names["daemon_id"].ty, FieldType::Str);
+    assert!(!parsed.names["target_daemon_id"].label);
+    for name in ["machine_id", "offline_machine_id", "target_machine_id"] {
+        assert!(!parsed.names.contains_key(name), "{name}");
+    }
 }

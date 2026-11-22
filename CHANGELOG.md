@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0 (breaking)
+
+concord-telemetry 0.6.0 (concord-fields, concord-telemetry-derive and
+concord-lint keep their versions; pin all four at the same revision).
+
+### Changed
+
+- Registry names follow the place/daemon rename: `machine_id` (a label) is now
+  `place_id`, `target_machine_id` is now `target_daemon_id`, and `daemon_id` is
+  new.
+- `offline_machine_id` is removed: nothing emitted it.
+
+### Migration
+
+- Consumers rename the field in their spans, events and `fail!` calls and delete
+  any local copy of these names in `fields.local.toml`. The baggage key
+  `concord.label.machine_id` becomes `concord.label.place_id`.
+
 ## 0.5.0
 
 concord-telemetry 0.5.0, concord-fields 0.2.0, concord-telemetry-derive 0.2.0,

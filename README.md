@@ -215,7 +215,7 @@ whose code follows the error class (`reject_anyhow_redacted` puts
 
 Labels are the baggage entries that travel with a trace (the fields marked
 `label = true` in `fields.toml`: `action_id`, `agent_id`, `delivery_id`,
-`instance_id`, `machine_id`, `message_id`, `request_id`, `session_id`,
+`instance_id`, `message_id`, `place_id`, `request_id`, `session_id`,
 `turn_id`; `concord_fields::label_names()` lists them). Helpers, all public:
 
 - `labels::parse(header)` and `labels::format(entries)`: pure, percent-decoding,
