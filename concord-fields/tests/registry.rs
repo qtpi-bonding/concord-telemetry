@@ -105,7 +105,7 @@ fn free_text_flag_read() {
 }
 
 #[test]
-fn label_names_are_the_ten_labels_sorted() {
+fn label_names_are_the_twelve_labels_sorted() {
     let expected = [
         "action_id",
         "agent_id",
@@ -116,6 +116,8 @@ fn label_names_are_the_ten_labels_sorted() {
         "place_id",
         "request_id",
         "session_id",
+        "source_instance_id",
+        "source_turn_id",
         "turn_id",
     ];
     assert_eq!(label_names(), expected);
@@ -138,4 +140,12 @@ fn the_reserved_keys_check_ok() {
         registry.check("concord.label.x"),
         FieldVerdict::ReservedPrefix
     );
+}
+
+#[test]
+fn a_local_registry_cannot_add_cause_kinds() {
+    let error = Registry::shared()
+        .with_local("[causes]\nx = { label = \"action_id\" }\n")
+        .expect_err("local causes must fail");
+    assert!(matches!(error, ParseError::LocalCauses), "{error:?}");
 }

@@ -68,6 +68,17 @@ pid = { type = "int", meaning = "Process id" }
 key_id = { type = "str", meaning = "Key thumbprint" }
 message_count = { type = "int", meaning = "Number of messages" }
 error_code = { type = "str", meaning = "Stable code of an error carried on an event" }
+causes = { type = "str", meaning = "Causes captured at a request's entry point, as a JSON array of {kind, id}; a span attribute, never a label" }
+source_instance_id = { type = "str", meaning = "Instance that issued a request (the caller's instance_id)", label = true }
+source_turn_id = { type = "str", meaning = "Turn that issued a request (the caller's turn_id)", label = true }
 
 [never]
 names = ["content", "body", "stdout", "stderr", "prompt", "env", "password", "token", "secret"]
+
+# Cause kinds: generic words, never service names. Each kind names the label that
+# carries its id; caller_label carries a caller's id the receiver would overwrite.
+[causes]
+action = {label = "action_id"}
+message = {label = "message_id"}
+instance = {label = "instance_id", caller_label = "source_instance_id"}
+turn = {label = "turn_id", caller_label = "source_turn_id"}

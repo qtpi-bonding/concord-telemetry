@@ -137,10 +137,12 @@ fn labels_unchanged() {
             "place_id",
             "request_id",
             "session_id",
+            "source_instance_id",
+            "source_turn_id",
             "turn_id"
         ]
     );
-    assert_eq!(Registry::shared().label_names().len(), 10);
+    assert_eq!(Registry::shared().label_names().len(), 12);
 }
 
 #[test]
@@ -154,4 +156,81 @@ fn machine_names_are_gone_place_and_daemon_are_registered() {
     for name in ["machine_id", "offline_machine_id", "target_machine_id"] {
         assert!(!parsed.names.contains_key(name), "{name}");
     }
+}
+
+#[test]
+fn the_shared_registry_maps_cause_kinds_to_labels() {
+    let shared = shared();
+    assert_eq!(
+        shared.causes["instance"],
+        concord_fields::CauseDef {
+            label: "instance_id".to_string(),
+            caller_label: Some("source_instance_id".to_string()),
+        }
+    );
+    assert!(
+        !shared
+            .causes
+            .values()
+            .any(|cause| cause.label == "session_id"),
+        "session_id is no cause label"
+    );
+    let labels = concord_fields::cause_labels(&shared);
+    assert_eq!(labels.len(), 6, "{labels:?}");
+    let found = labels
+        .iter()
+        .find(|(label, _)| label == "source_turn_id")
+        .expect("source_turn_id is a cause label");
+    assert_eq!(found.1, "turn");
+}
+
+#[test]
+fn a_cause_label_must_be_a_registered_label() {
+    let error = parse(
+        "[fields]\nroom_id = { type = \"str\", meaning = \"x\" }\n[causes]\nx = { label = \"room_id\" }\n",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            concord_fields::ParseError::CauseLabelNotALabel { .. }
+        ),
+        "{error:?}"
+    );
+    let error = parse("[causes]\nx = { label = \"not_a_field\" }\n").unwrap_err();
+    assert!(
+        matches!(
+            error,
+            concord_fields::ParseError::CauseLabelNotALabel { .. }
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_cause_kind_is_a_lowercase_word() {
+    for kind in ["Action", "a-b"] {
+        let error =
+            parse(&format!("[causes]\n{kind} = {{ label = \"action_id\" }}\n")).unwrap_err();
+        assert!(
+            matches!(error, concord_fields::ParseError::CauseKindName { .. }),
+            "{kind}: {error:?}"
+        );
+    }
+}
+
+#[test]
+fn a_label_serves_one_kind() {
+    let error = parse("[fields]\naction_id = { type = \"str\", meaning = \"m\", label = true }\n[causes]\na = { label = \"action_id\" }\nb = { label = \"action_id\" }\n")
+        .unwrap_err();
+    assert!(
+        matches!(error, concord_fields::ParseError::CauseLabelTwice { .. }),
+        "{error:?}"
+    );
+    let error = parse("[fields]\naction_id = { type = \"str\", meaning = \"m\", label = true }\n[causes]\na = { label = \"action_id\", caller_label = \"action_id\" }\n")
+        .unwrap_err();
+    assert!(
+        matches!(error, concord_fields::ParseError::CauseLabelTwice { .. }),
+        "{error:?}"
+    );
 }

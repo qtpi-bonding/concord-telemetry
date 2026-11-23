@@ -45,6 +45,14 @@ pub struct FieldDef {
     pub free_text: bool,
 }
 
+/// One registered cause kind: the label that carries its id, and optionally the
+/// caller label that carries a caller's id the receiver would overwrite.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CauseDef {
+    pub label: String,
+    pub caller_label: Option<String>,
+}
+
 /// A parsed registry file.
 #[derive(Clone, Debug, Default)]
 pub struct Parsed {
@@ -53,6 +61,8 @@ pub struct Parsed {
     /// `[lint] log_macros`: a repo's own wrapper macros (bare names) that the
     /// lint treats as field-bearing: first argument the error, the rest fields.
     pub log_macros: BTreeSet<String>,
+    /// `[causes]`: cause kind → the labels that carry its id.
+    pub causes: BTreeMap<String, CauseDef>,
 }
 
 /// Why a registry file was refused.
@@ -78,6 +88,14 @@ pub enum ParseError {
     NeverAndRegistered { name: String },
     #[error("{name} is a never-log name")]
     NeverName { name: String },
+    #[error("cause kind `{kind}` must be a lowercase word (^[a-z][a-z_]*$)")]
+    CauseKindName { kind: String },
+    #[error("cause kind `{kind}` names `{label}`, which is not a label in [fields]")]
+    CauseLabelNotALabel { kind: String, label: String },
+    #[error("`{label}` serves more than one cause kind")]
+    CauseLabelTwice { label: String },
+    #[error("a local registry may not have a [causes] table")]
+    LocalCauses,
 }
 
 #[derive(Default, Deserialize)]
@@ -94,6 +112,8 @@ struct Document {
     fields: BTreeMap<String, Definition>,
     #[serde(default)]
     never: Never,
+    #[serde(default)]
+    causes: BTreeMap<String, CauseRow>,
 }
 
 #[derive(Deserialize)]
@@ -112,6 +132,32 @@ struct Definition {
 struct Never {
     #[serde(default)]
     names: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CauseRow {
+    label: String,
+    #[serde(default)]
+    caller_label: Option<String>,
+}
+
+/// The cause labels of a parsed registry as `(label, kind)`, sorted by label.
+pub fn cause_labels(parsed: &Parsed) -> Vec<(String, String)> {
+    let mut labels: Vec<(String, String)> = parsed
+        .causes
+        .iter()
+        .flat_map(|(kind, cause)| {
+            let kind = kind.clone();
+            std::iter::once((cause.label.clone(), kind.clone())).chain(
+                cause
+                    .caller_label
+                    .clone()
+                    .map(|caller| (caller, kind.clone())),
+            )
+        })
+        .collect();
+    labels.sort();
+    labels
 }
 
 fn field_type(name: &str, found: Option<String>) -> Result<FieldType, ParseError> {
@@ -180,10 +226,41 @@ pub fn parse(source: &str) -> Result<Parsed, ParseError> {
         }
         log_macros.insert(name);
     }
+    let mut causes = BTreeMap::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for (kind, row) in document.causes {
+        if !(kind.starts_with(|c: char| c.is_ascii_lowercase())
+            && kind.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+        {
+            return Err(ParseError::CauseKindName { kind });
+        }
+        let labels = std::iter::once(&row.label).chain(row.caller_label.as_ref());
+        for label in labels {
+            if !names.get(label).is_some_and(|def| def.label) {
+                return Err(ParseError::CauseLabelNotALabel {
+                    kind: kind.clone(),
+                    label: label.clone(),
+                });
+            }
+            if !seen.insert(label.clone()) {
+                return Err(ParseError::CauseLabelTwice {
+                    label: label.clone(),
+                });
+            }
+        }
+        causes.insert(
+            kind,
+            CauseDef {
+                label: row.label,
+                caller_label: row.caller_label,
+            },
+        );
+    }
     Ok(Parsed {
         names,
         never: document.never.names.into_iter().collect(),
         log_macros,
+        causes,
     })
 }
 
@@ -240,10 +317,13 @@ mod tests {
             "message_id",
             "instance_id",
             "place_id",
+            "source_instance_id",
+            "source_turn_id",
         ] {
             assert!(shared.names[name].label, "{name}");
         }
         assert!(!shared.names["room_id"].label);
+        assert!(!shared.names["causes"].label);
         assert!(shared.never.contains("password"));
     }
 }

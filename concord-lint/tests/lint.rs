@@ -759,6 +759,33 @@ fn unregistered_error_code_field_is_ok_now() {
 }
 
 #[test]
+fn a_local_causes_table_is_refused() {
+    let dir = std::env::temp_dir().join(format!("concord-lint-causes-{}", std::process::id()));
+    fs::create_dir_all(&dir).expect("temp dir");
+    let local = dir.join("local-fields.toml");
+    fs::write(&local, "[causes]\nx = { label = \"action_id\" }\n").expect("write local");
+    let output = binary()
+        .args(["--local", local.to_str().expect("path is utf8")])
+        .arg(fixture("clean.rs"))
+        .output()
+        .expect("lint runs");
+    fs::remove_dir_all(&dir).expect("cleanup");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf8");
+    assert!(stderr.contains("causes"), "{stderr}");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn causes_is_a_registered_span_field() {
+    assert!(scan_with(
+        &Registry::shared(),
+        "fn f(){ tracing::info!(causes = \"[]\", \"m\"); }"
+    )
+    .is_empty());
+}
+
+#[test]
 fn lint_errors_are_typed() {
     use concord_lint::{baseline, LintError};
     let missing = Path::new("/nonexistent/concord-lint-baseline.txt");

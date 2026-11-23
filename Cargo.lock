@@ -259,8 +259,8 @@ dependencies = [
 
 [[package]]
 name = "concord-telemetry-proto"
-version = "0.2.0"
-source = "git+https://github.com/qtpi-bonding/concord-telemetry-proto.git?rev=4892badae333cfa7ebfdb4f17c76d65bb63612e4#4892badae333cfa7ebfdb4f17c76d65bb63612e4"
+version = "0.3.0"
+source = "git+https://github.com/qtpi-bonding/concord-telemetry-proto.git?rev=2c696ccd91396879ca8025ef9e8992126c5cfcee#2c696ccd91396879ca8025ef9e8992126c5cfcee"
 dependencies = [
  "prost 0.13.5",
  "serde",
@@ -765,15 +765,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1047,7 +1038,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6eea3058763d6e656105d1403cb04e0a41b7bbac6362d413e7c33be0c32279c9"
 dependencies = [
  "heck",
- "itertools 0.13.0",
+ "itertools",
  "prost 0.13.5",
  "prost-types",
 ]
@@ -1185,7 +1176,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.14.0",
+ "itertools",
  "log",
  "multimap",
  "once_cell",
@@ -1205,7 +1196,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -1218,7 +1209,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools",
  "proc-macro2",
  "quote",
  "syn 2.0.119",

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{parse, FieldDef, ParseError, Parsed, RESERVED_NAMESPACE};
+use crate::{parse, CauseDef, FieldDef, ParseError, Parsed, RESERVED_NAMESPACE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldVerdict {
@@ -17,6 +17,8 @@ pub struct Registry {
     pub never: BTreeSet<String>,
     /// Wrapper macros declared field-bearing in the local registry.
     pub log_macros: BTreeSet<String>,
+    /// `[causes]`: cause kind → the labels that carry its id.
+    pub causes: BTreeMap<String, CauseDef>,
 }
 
 impl Registry {
@@ -25,6 +27,12 @@ impl Registry {
     }
 
     pub fn with_local(mut self, source: &str) -> Result<Registry, ParseError> {
+        if source
+            .lines()
+            .any(|line| line.trim_start().starts_with("[causes]"))
+        {
+            return Err(ParseError::LocalCauses);
+        }
         let local = from_parsed(parse(source)?);
         for name in local.names.keys() {
             if local.never.contains(name) {
@@ -45,12 +53,23 @@ impl Registry {
         self.names.extend(local.names);
         self.never.extend(local.never);
         self.log_macros.extend(local.log_macros);
+        if !local.causes.is_empty() {
+            return Err(ParseError::LocalCauses);
+        }
         Ok(self)
     }
 
     /// True when `name` is registered with `label = true`.
     pub fn is_label(&self, name: &str) -> bool {
         self.names.get(name).is_some_and(|def| def.label)
+    }
+
+    /// The cause kind whose label (or caller label) is `name`.
+    pub fn cause_kind(&self, label: &str) -> Option<&str> {
+        self.causes
+            .iter()
+            .find(|(_, cause)| cause.label == label || cause.caller_label.as_deref() == Some(label))
+            .map(|(kind, _)| kind.as_str())
     }
 
     /// True when `name` is registered with `free_text = true`.
@@ -90,6 +109,7 @@ fn from_parsed(parsed: Parsed) -> Registry {
         names: parsed.names,
         never: parsed.never,
         log_macros: parsed.log_macros,
+        causes: parsed.causes,
     }
 }
 
