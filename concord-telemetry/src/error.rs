@@ -169,6 +169,54 @@ macro_rules! error_anyhow {
     }};
 }
 
+/// Emit a coded record at WARN for a degraded but handled condition: the error
+/// is recovered from, so the span is not marked failed (no `error.code`
+/// attribute and no error status). Otherwise as `error!`.
+#[macro_export]
+macro_rules! warn {
+    ($err:expr, source = $source:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::Facts::of(error);
+        let chain = $crate::__private::error::chain_typed(&*error);
+        $crate::__emit_record!(
+            $crate::__private::tracing::Level::WARN, false, facts, chain, $source
+            $(, $($fields)*)?
+        )
+    }};
+    ($err:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::Facts::of(error);
+        let chain = $crate::__private::error::chain_typed(&*error);
+        $crate::__emit_record!(
+            $crate::__private::tracing::Level::WARN, false, facts, chain,
+            ::core::module_path!() $(, $($fields)*)?
+        )
+    }};
+}
+
+/// `warn!` for an `anyhow::Error`, as `error_anyhow!` is to `error!`.
+#[macro_export]
+macro_rules! warn_anyhow {
+    ($err:expr, source = $source:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::facts_anyhow(error);
+        let chain = $crate::__private::error::chain_anyhow(error);
+        $crate::__emit_record!(
+            $crate::__private::tracing::Level::WARN, false, facts, chain, $source
+            $(, $($fields)*)?
+        )
+    }};
+    ($err:expr $(, $($fields:tt)*)?) => {{
+        let error = $err;
+        let facts = $crate::__private::coded_error::facts_anyhow(error);
+        let chain = $crate::__private::error::chain_anyhow(error);
+        $crate::__emit_record!(
+            $crate::__private::tracing::Level::WARN, false, facts, chain,
+            ::core::module_path!() $(, $($fields)*)?
+        )
+    }};
+}
+
 /// Records `error` with an explicit code location and runtime field pairs, for
 /// a wrapper (an error hook) whose field names are only known at run time, which
 /// `tracing::event!` cannot take. The record is the one `error_at!` makes (the
@@ -284,23 +332,36 @@ pub fn record_error_span(span: &tracing::Span, facts: &coded_error::Facts) {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __emit_error {
-    ($facts:expr, $chain:expr, $source:expr $(, $($fields:tt)*)?) => {{
+macro_rules! __emit_record {
+    ($level:expr, $mark_span:expr, $facts:expr, $chain:expr, $source:expr $(, $($fields:tt)*)?) => {{
         let facts: $crate::__private::coded_error::Facts = $facts;
         let chain: ::std::vec::Vec<$crate::__private::coded_error::ChainLink> = $chain;
         let source: &str = $source;
         let (chain_json, message) = $crate::__private::error::chain_json(&chain, $crate::error_text());
-        let current = $crate::__private::tracing::Span::current();
-        $crate::__private::record_error_span(&current, &facts);
+        if $mark_span {
+            let current = $crate::__private::tracing::Span::current();
+            $crate::__private::record_error_span(&current, &facts);
+        }
         let fingerprint = $crate::__private::coded_error::fingerprint(facts.code, facts.class, source);
         $crate::__private::tracing::event!(
-            name: "error", target: $crate::EVENT_TARGET, $crate::__private::tracing::Level::ERROR,
+            name: "error", target: $crate::EVENT_TARGET, $level,
             error.code = facts.code, error.class = facts.class.as_str(),
             error.fingerprint = fingerprint.as_str(), error.source = source,
             error.chain = chain_json.as_str(), error.message = message.as_deref().unwrap_or(""),
             $($($fields)*)?
         );
     }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __emit_error {
+    ($facts:expr, $chain:expr, $source:expr $(, $($fields:tt)*)?) => {
+        $crate::__emit_record!(
+            $crate::__private::tracing::Level::ERROR, true, $facts, $chain, $source
+            $(, $($fields)*)?
+        )
+    };
 }
 
 #[cfg(test)]

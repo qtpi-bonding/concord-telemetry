@@ -147,6 +147,43 @@ fn error_at_and_error_at_anyhow_fields_are_checked_after_the_location_arguments(
     assert_eq!(scan("src/lib.rs", clean), vec!["unregistered-field"]);
 }
 
+#[test]
+fn concord_warn_fields_are_checked() {
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "fn f(e: &MyError) { concord_telemetry::warn!(&e, bogus_field = 1); }"
+        ),
+        vec!["unregistered-field"]
+    );
+    assert!(scan(
+        "src/lib.rs",
+        "use concord_telemetry::warn; fn f(e: &MyError, x: u8) { warn!(&e, action_id = x); }"
+    )
+    .is_empty());
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "use tracing::warn; fn f(x: u8) { warn!(bogus_field = 1, \"m\"); }"
+        ),
+        vec!["unregistered-field"]
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "use tracing::warn; fn f(x: u8) { warn!(\"m {x}\"); }"
+        ),
+        vec!["message-has-values"]
+    );
+    assert_eq!(
+        scan(
+            "src/lib.rs",
+            "use concord_telemetry::warn; fn f(e: &MyError) { warn!(&e, bogus_field = 1); }"
+        ),
+        vec!["unregistered-field"]
+    );
+}
+
 /// A wrapper macro is field-bearing only when the repo declares it in its local
 /// registry (`[lint] log_macros`); the first argument is the error, the rest are
 /// fields, as with `error!`.

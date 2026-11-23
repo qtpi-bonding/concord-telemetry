@@ -5,7 +5,9 @@
 #[path = "proto/fixtures.rs"]
 mod fixtures;
 
-use concord_telemetry::{carrier, error, error_anyhow, init, Config, Event, Guard, LocalOutput};
+use concord_telemetry::{
+    carrier, error, error_anyhow, init, warn, Config, Event, Guard, LocalOutput,
+};
 use fixtures::{ActionStatusChanged, Status};
 use std::path::PathBuf;
 use std::sync::{Mutex, Once};
@@ -102,6 +104,26 @@ fn error_macro_compiles_and_writes_code() {
     let parsed: serde_json::Value = serde_json::from_str(&lines[0]).expect("json line");
     assert_eq!(parsed["fields"]["error.code"], "test.off.failed");
     assert_eq!(parsed["fields"]["error.class"], "logical");
+}
+
+#[derive(Debug, thiserror::Error, coded_error::CodedError)]
+#[coded(namespace = "test.off")]
+enum OffWarning {
+    #[error("off degraded")]
+    #[coded(code = "degraded", class = Logical)]
+    Degraded,
+}
+
+#[test]
+fn warn_macro_compiles_and_writes_code() {
+    log_path();
+    let warning = OffWarning::Degraded;
+    warn!(&warning, source = "off.source.warn");
+    let lines = lines_with("off.source.warn");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let parsed: serde_json::Value = serde_json::from_str(&lines[0]).expect("json line");
+    assert_eq!(parsed["level"], "WARN");
+    assert_eq!(parsed["fields"]["error.code"], "test.off.degraded");
 }
 
 #[test]

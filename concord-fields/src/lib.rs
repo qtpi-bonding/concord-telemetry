@@ -211,6 +211,7 @@ pub fn parse(source: &str) -> Result<Parsed, ParseError> {
             || [
                 "error",
                 "error_anyhow",
+                "warn_anyhow",
                 "error_at",
                 "error_at_anyhow",
                 "trace",

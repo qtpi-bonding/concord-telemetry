@@ -39,7 +39,15 @@ fn collect_use_tree(
             {
                 tracing.push(alias);
             } else if prefix.first().map(String::as_str) == Some("concord_telemetry")
-                && ["error", "error_anyhow", "error_at", "error_at_anyhow"].contains(&original)
+                && [
+                    "error",
+                    "error_anyhow",
+                    "warn",
+                    "warn_anyhow",
+                    "error_at",
+                    "error_at_anyhow",
+                ]
+                .contains(&original)
             {
                 concord.push(alias);
             } else {
@@ -61,7 +69,14 @@ fn collect_use_tree(
 
 fn register_import(path: Vec<String>, tracing: &mut Vec<String>, concord: &mut Vec<String>) {
     let allowed_tracing = ["trace", "debug", "info", "warn", "error", "event"];
-    let allowed_concord = ["error", "error_anyhow", "error_at", "error_at_anyhow"];
+    let allowed_concord = [
+        "error",
+        "error_anyhow",
+        "warn",
+        "warn_anyhow",
+        "error_at",
+        "error_at_anyhow",
+    ];
     if path.first().map(String::as_str) == Some("tracing") {
         if path.last().map(String::as_str) == Some("*") {
             tracing.extend(allowed_tracing.iter().map(|name| (*name).to_string()));

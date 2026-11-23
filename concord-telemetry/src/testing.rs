@@ -23,6 +23,8 @@ static EXCLUSIVE: Mutex<()> = Mutex::new(());
 pub struct ErrorRecord {
     pub code: String,
     pub class: String,
+    /// `"ERROR"` for `error!`, `"WARN"` for `warn!`.
+    pub level: String,
     pub fingerprint: String,
     pub source: String,
     pub fields: Attrs,
@@ -317,7 +319,10 @@ impl Capture {
         self.records()
             .into_iter()
             .filter(|log| log.event_name() == Some("error"))
-            .filter_map(|log| error_record(log.attributes_iter()))
+            .filter_map(|log| {
+                let level = log.severity_text().unwrap_or_default();
+                error_record(level, log.attributes_iter())
+            })
             .filter(predicate)
             .collect()
     }
@@ -362,13 +367,14 @@ fn any_value(value: &AnyValue) -> Option<AttrValue> {
     }
 }
 
-fn error_record<'a, I>(iter: I) -> Option<ErrorRecord>
+fn error_record<'a, I>(level: &str, iter: I) -> Option<ErrorRecord>
 where
     I: IntoIterator<Item = &'a (opentelemetry::Key, AnyValue)>,
 {
     let attrs = attrs(iter);
     let code = string_attr(&attrs, "error.code")?;
     let class = string_attr(&attrs, "error.class")?;
+    let level = level.to_owned();
     let fingerprint = string_attr(&attrs, "error.fingerprint")?;
     let source = string_attr(&attrs, "error.source")?;
     let mut fields = attrs;
@@ -379,6 +385,7 @@ where
     Some(ErrorRecord {
         code,
         class,
+        level,
         fingerprint,
         source,
         fields,

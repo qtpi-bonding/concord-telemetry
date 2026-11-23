@@ -345,6 +345,10 @@ character boundary, ending in `...[truncated]`; codes, classes and
 fingerprints are never cut. A panic is recorded as `concord.process.panic` (class unknown, source the
 panic location).
 
+`concord_telemetry::warn!(&err, source = X::NAME, …)` and `warn_anyhow!` make the same record at WARN
+(`level` is `"WARN"`) for a degraded but handled condition. The span is not marked failed: no
+`error.code` attribute and no error status.
+
 ## Trace context
 
 One request keeps one trace id across processes (W3C `traceparent`). With the

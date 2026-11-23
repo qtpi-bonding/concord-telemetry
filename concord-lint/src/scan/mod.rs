@@ -101,7 +101,14 @@ impl<'a> Scanner<'a> {
         let name = path.segments.last()?.ident.to_string();
         let full = quote_path(path);
         let tracing_names = ["trace", "debug", "info", "warn", "error", "event"];
-        let concord_names = ["error", "error_anyhow", "error_at", "error_at_anyhow"];
+        let concord_names = [
+            "error",
+            "error_anyhow",
+            "warn",
+            "warn_anyhow",
+            "error_at",
+            "error_at_anyhow",
+        ];
         if (path.segments.len() == 1 && self.tracing.contains(&name)
             || path.segments.len() == 2 && full.starts_with("tracing::"))
             && (tracing_names.contains(&name.as_str()) || self.tracing.contains(&name))
