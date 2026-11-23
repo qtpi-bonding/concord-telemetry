@@ -8,7 +8,7 @@
 //! future is ready. `rpc.grpc.status_code` is not recorded: it lives in
 //! trailers, which needs a body wrapper (not implemented).
 
-use crate::{carrier, init::HTTP_TARGET, TraceCarrier};
+use crate::{carrier, causes, init::HTTP_TARGET, TraceCarrier};
 use pin_project_lite::pin_project;
 use std::future::Future;
 use std::pin::Pin;
@@ -73,7 +73,7 @@ pin_project! {
     #[project = ResponseFutureProj]
     pub struct ResponseFuture<F> {
         #[pin]
-        inner: Option<F>,
+        inner: Option<causes::Scoped<F>>,
         span: Span,
     }
 
@@ -148,9 +148,12 @@ where
             #[cfg(feature = "otel")]
             method,
         });
-        let future = span.in_scope(|| self.inner.call(request));
+        let causes = span.in_scope(causes::capture_incoming);
+        let future = causes::sync_scope(causes.clone(), || {
+            span.in_scope(|| self.inner.call(request))
+        });
         ResponseFuture {
-            inner: Some(future),
+            inner: Some(causes::scope(causes, future)),
             span,
         }
     }

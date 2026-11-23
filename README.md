@@ -241,6 +241,36 @@ from the `session_id` label) and `acp_session_id` (the id held with an ACP agent
 apart from the upstream session id). A name that belongs to one application
 stays in that application's `fields.local.toml`.
 
+## Causes
+
+Causes are the registered ids a request was caused by (an action, a turn, a
+message, an instance), from the `[causes]` table of `fields.toml`. They are
+not labels: they never travel as baggage and never stamp `concord.label.*`.
+Each cause is a `Cause { kind, id }` (the `concord_telemetry.v1` proto type,
+re-exported here).
+
+- Capture at the door. Every entry point that adopts a carrier (gRPC and HTTP
+  ingress, `parent_on`, `set_parent_from_env`, NATS `parent_on`) stores a frozen
+  snapshot of the causes its baggage named, in the span. An entry with no
+  baggage stores an empty snapshot, so it is a boundary.
+- `causes::capture_incoming()` returns the nearest entry's snapshot. Later
+  `context::add` calls never change it: a handler that writes its own
+  `action_id` still reports the caller's cause.
+- `causes::scope(causes, fut)` and `causes::sync_scope(causes, f)` hold the
+  snapshot as a task-local, so `causes::incoming()` reads it across awaits. The
+  gRPC and HTTP layers scope their handlers themselves. A spawned task does not
+  inherit it: pass the causes to `scope` explicitly. `scope_with(extra, fut)`
+  extends the incoming causes for one inner call only.
+- `causes::excluding(&[(kind, id)])` removes exactly the pairs given. Which
+  records contain which causes is the caller's table, not this crate's.
+- `Causes::new`, `with` and `from_entries` drop a kind that is not in
+  `[causes]`, an empty id, an id over 256 bytes, a repeat, and anything past 8
+  causes. One `concord.trace.causes_dropped` WARN (field `dropped`) per
+  construction that dropped anything.
+- `Causes::to_json()` is the `causes` span attribute, written with the `otel`
+  feature only (`[{"kind":"action","id":"A1"}]`). Without `otel` it is not
+  recorded anywhere; local JSON lines do not carry it.
+
 ## Events
 
 ```rust

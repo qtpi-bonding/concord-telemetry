@@ -9,6 +9,7 @@
 use crate::baggage;
 #[cfg(feature = "otel")]
 use crate::carrier;
+use crate::causes;
 #[cfg(feature = "otel")]
 use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
 #[cfg(feature = "otel")]
@@ -83,20 +84,30 @@ pub(crate) fn parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>)
                 Err(tracing_opentelemetry::SetParentError::AlreadyStarted)
             );
         if !refused {
-            if let Some(header) = get("baggage") {
-                baggage::ingest(span, &header);
-            }
+            adopt_baggage(span, &get);
         }
         valid
     };
     #[cfg(not(feature = "otel"))]
     let valid = {
-        if let Some(header) = get("baggage") {
-            baggage::ingest(span, &header);
-        }
+        adopt_baggage(span, &get);
         false
     };
     valid
+}
+
+/// Takes the carrier's baggage into `span` and snapshots its causes as the
+/// entry point's. A carrier with no baggage is still an entry, with none. A
+/// span that refuses the baggage (already entered with labels) keeps its
+/// earlier snapshot.
+fn adopt_baggage(span: &tracing::Span, get: &impl Fn(&str) -> Option<String>) {
+    let kept = match get("baggage") {
+        Some(header) => baggage::ingest(span, &header),
+        None => Some(Vec::new()),
+    };
+    if let Some(kept) = kept {
+        causes::mark_entry(span, &kept);
+    }
 }
 
 /// `set_parent` from the `TRACEPARENT` and `BAGGAGE` environment variables.

@@ -6,13 +6,13 @@
 //!
 //! The server span covers the handler's future up to its response. Items a
 //! streaming response produces later are polled outside it, so their records
-//! carry no trace id.
+//! carry no trace id, and `causes::incoming()` is empty there too.
 //!
 //! With the `grpc-status` feature, [`reject`], [`reject_anyhow`] and
 //! [`reject_anyhow_redacted`] turn an error into the `tonic::Status` a handler
 //! returns and record it, at the handler's own file and line.
 
-use crate::{carrier, init::GRPC_TARGET, TraceCarrier};
+use crate::{carrier, causes, init::GRPC_TARGET, TraceCarrier};
 use std::task::{Context, Poll};
 use tower_layer::Layer;
 use tower_service::Service;
@@ -65,7 +65,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = Instrumented<S::Future>;
+    type Future = Instrumented<causes::Scoped<S::Future>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
         self.inner.poll_ready(cx)
@@ -87,8 +87,11 @@ where
                 .map(str::to_owned)
         });
         carrier::extract_ingress("grpc", &span, &incoming);
-        let future = span.in_scope(|| self.inner.call(request));
-        future.instrument(span)
+        let causes = span.in_scope(causes::capture_incoming);
+        let future = causes::sync_scope(causes.clone(), || {
+            span.in_scope(|| self.inner.call(request))
+        });
+        causes::scope(causes, future).instrument(span)
     }
 }
 

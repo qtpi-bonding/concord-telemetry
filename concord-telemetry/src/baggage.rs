@@ -238,7 +238,7 @@ where
 
 /// Runs `f` on the span's extensions, if the subscriber is a `Registry`
 /// carrying a `BaggageLayer`. Otherwise the baggage helpers are no-ops.
-fn with_extensions<R>(
+pub(crate) fn with_extensions<R>(
     span: &Span,
     f: impl FnOnce(&tracing_subscriber::registry::SpanRef<'_, Registry>) -> R,
 ) -> Option<R> {

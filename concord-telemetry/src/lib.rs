@@ -2,6 +2,7 @@ extern crate self as concord_telemetry;
 
 mod baggage;
 pub mod carrier;
+pub mod causes;
 mod coded;
 #[cfg(feature = "otel")]
 mod deadline;
@@ -43,6 +44,8 @@ pub fn clip(value: &str) -> &str {
 pub use carrier::{
     BAGGAGE_DROPPED_CODE, CARRIER_DROPPED_CODE, FIELD_DROPPED_CODE, TRACE_MISSING_CODE,
 };
+pub use causes::CAUSES_DROPPED_CODE;
+pub use concord_telemetry_proto::v1::Cause;
 pub use concord_telemetry_proto::TraceCarrier;
 
 pub use concord_telemetry_derive::Event;
