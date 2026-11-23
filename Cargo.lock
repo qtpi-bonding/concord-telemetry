@@ -194,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "concord-fields"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "concord-lint"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "concord-fields",
  "proc-macro2",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "concord-telemetry"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "coded-error",

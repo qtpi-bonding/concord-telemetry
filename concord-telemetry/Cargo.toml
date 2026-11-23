@@ -1,6 +1,6 @@
 [package]
 name = "concord-telemetry"
-version = "0.6.0"
+version = "0.7.0"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -22,7 +22,7 @@ concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telem
 concord-telemetry-derive = { path = "../concord-telemetry-derive", version = "0.2.0" }
 coded-error = { git = "https://github.com/qtpi-bonding/coded-error.git", rev = "de21d22e31baff78eae7d4ca817b87430bff1f81", features = ["anyhow"] }
 anyhow = "1"
-concord-fields = { path = "../concord-fields", version = "0.2.0" }
+concord-fields = { path = "../concord-fields", version = "0.3.0" }
 opentelemetry = { version = "=0.33.1", default-features = false, features = ["logs", "trace"], optional = true }
 opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["logs", "trace"], optional = true }
 opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["http-proto", "logs", "trace"], optional = true }

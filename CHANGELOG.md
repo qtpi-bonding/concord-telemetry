@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.7.0 (breaking)
+
+concord-telemetry 0.7.0, concord-fields 0.3.0, concord-lint 0.3.0;
+concord-telemetry-derive stays 0.2.0; needs concord-telemetry-proto 0.3.0.
+
+### Added
+
+- `causes` module: each entry point keeps a capped, de-duplicated snapshot of
+  the cause labels it received (`Causes`), recorded with `otel` as the `causes`
+  span attribute; `CAUSES_DROPPED_CODE` when some are dropped.
+- `warn!` / `warn_anyhow!`: a coded record at WARN for a degraded but handled
+  condition; the span is not marked failed.
+- `fields.toml` `[causes]` table (cause kind → label and caller label), and the
+  fields `causes` (span attribute, never a label), `source_instance_id` and
+  `source_turn_id` (labels).
+
+### Changed
+
+- Labels and baggage are always built; `init` always installs the label layer.
+  With `otel` off or no exporter, `capture`, `inject` and the gRPC client send
+  `baggage`, and `parent_on`, `set_parent`, `extract_*` and
+  `set_parent_from_env` adopt it.
+- A valid `traceparent` with no OpenTelemetry layer no longer blocks baggage.
+- `ServerService::Future` and `ResponseFuture` hold `causes::Scoped`.
+- tokio `rt` is a normal dependency.
+- `testing::ErrorRecord` gains `level`.
+
+### Migration
+
+- Bump all four crates and concord-telemetry-proto at one revision.
+- structmux deletes its local `source_instance_id`.
+- Consumers still at 469bfd0 also apply the 0.6.0 rename.
+- A local registry with a `[causes]` table is refused.
+
 ## 0.6.0 (breaking)
 
 concord-telemetry 0.6.0 (concord-fields, concord-telemetry-derive and

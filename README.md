@@ -20,7 +20,7 @@ repo; `concord-telemetry` depends on it and re-exports the types.
 
 | Feature | Default | Adds |
 | --- | --- | --- |
-| `otel` | yes | OpenTelemetry export: OTLP exporters, trace ids, span processors, the baggage layer. Without it the whole API still compiles and runs, but nothing is exported and no trace ids exist. |
+| `otel` | yes | OpenTelemetry export: OTLP exporters, trace ids, span processors. Without it the whole API still compiles and runs, but nothing is exported and no trace ids exist; labels and causes work in every build. |
 | `tls` | no | HTTPS to the collector (reqwest's rustls); implies `otel`. |
 | `testing` | no | The `testing` module; implies `otel`. |
 | `grpc` | no | `grpc::ServerLayer` / `grpc::client` over `http::Request`; no tonic. |
@@ -42,9 +42,10 @@ exporter, no thread, an inert `Guard`). Check the result with
 telemetry); both judge by the package names in `cargo tree -e normal`.
 
 With `otel` off: `init` installs the local layer only (`Text`, `Json`,
-`JsonFile`, `Off` all work), `Guard` is empty, `carrier::capture()` returns an
-empty carrier, `parent_on`, `link_from`, `extract_*` and the label readers are
-no-ops, the `grpc` and `http_server` layers still open their spans, and the
+`JsonFile`, `Off` all work) plus the label layer, `Guard` is empty,
+`carrier::capture()` carries `baggage` (no `traceparent`), `parent_on` and
+`extract_*` adopt baggage but set no trace, `link_from` is a no-op, the label
+readers work, the `grpc` and `http_server` layers still open their spans, and the
 `Event` derive and `error!` macros still write their fields to the local output.
 The `concord_telemetry::__private` re-exports of `opentelemetry` exist only with `otel`.
 
@@ -216,7 +217,7 @@ whose code follows the error class (`reject_anyhow_redacted` puts
 Labels are the baggage entries that travel with a trace (the fields marked
 `label = true` in `fields.toml`: `action_id`, `agent_id`, `daemon_id`,
 `delivery_id`, `instance_id`, `message_id`, `place_id`, `request_id`,
-`session_id`, `turn_id`; `concord_fields::label_names()` lists them).
+`session_id`, `source_instance_id`, `source_turn_id`, `turn_id`; `concord_fields::label_names()` lists them).
 Helpers, all public:
 
 - `labels::parse(header)` and `labels::format(entries)`: pure, percent-decoding,
@@ -224,7 +225,7 @@ Helpers, all public:
   properties dropped, invalid entries skipped. They work with `otel` off.
 - `labels::of(span, key)`, `labels::add_once(span, key, value)` (no-op when the
   label is present or the value empty) and `labels::record_once(span, field, value)`
-  (a `span.record` unless the label exists). No-ops with `otel` off or no exporter.
+  (a `span.record` unless the label exists).
 - `carrier::with_label(&carrier, key, value)` (replace or append; an invalid
   label leaves the carrier as it was and records `concord.trace.baggage_dropped`),
   `carrier::without_label(&carrier, key)`, and
