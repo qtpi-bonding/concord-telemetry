@@ -1,6 +1,5 @@
 extern crate self as concord_telemetry;
 
-#[cfg(feature = "otel")]
 mod baggage;
 pub mod carrier;
 mod coded;

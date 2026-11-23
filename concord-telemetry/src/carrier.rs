@@ -1,17 +1,17 @@
 //! Trace carriers: capturing the current trace and baggage, and joining or
 //! linking to one on the other side of a boundary.
 //!
-//! Without an exporter there is no span layer: `capture` returns an empty
-//! carrier, the extract helpers change nothing, and `concord.trace.missing`
-//! is never recorded.
+//! Without an exporter `capture` still returns the labels (the `baggage`
+//! header), and the parent helpers still take them. There is no trace context
+//! and no `traceparent`, and `concord.trace.missing` is never recorded.
 
+use crate::baggage;
 use crate::coded::emit_coded;
 use crate::init::EVENT_TARGET;
 use crate::labels;
+use crate::propagation;
 #[cfg(feature = "otel")]
 use crate::propagation::Fields;
-#[cfg(feature = "otel")]
-use crate::{baggage, propagation};
 use coded_error::ErrorClass;
 use concord_telemetry_proto::TraceCarrier;
 #[cfg(feature = "otel")]
@@ -81,7 +81,6 @@ pub fn capture() -> TraceCarrier {
     carrier
 }
 
-#[cfg(feature = "otel")]
 fn getter(c: &TraceCarrier) -> impl Fn(&str) -> Option<String> + '_ {
     |key| match key {
         "traceparent" => c.traceparent.clone(),
@@ -97,15 +96,11 @@ fn getter(c: &TraceCarrier) -> impl Fn(&str) -> Option<String> + '_ {
 /// span entered, so it does too). On a span that was already entered, a
 /// `traceparent` is refused (`set_parent` cannot re-parent) and so is the
 /// baggage: the labels stay as they were. A carrier without a valid
-/// `traceparent` leaves the span's contextual parent in place.
-#[cfg(feature = "otel")]
+/// `traceparent` leaves the span's contextual parent in place. Without the
+/// `otel` feature only the labels are taken.
 pub fn parent_on(span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
 }
-
-/// `parent_on` with the otel feature off: nothing to parent.
-#[cfg(not(feature = "otel"))]
-pub fn parent_on(_span: &Span, _c: &TraceCarrier) {}
 
 /// Gives `span` a link to the carrier's span context, in a trace of its own.
 /// A link carries span context only, as in OpenTelemetry: the span's labels
@@ -129,33 +124,28 @@ pub fn link_from(_span: &Span, _c: &TraceCarrier) {}
 /// no valid `traceparent` it records `concord.trace.missing` with the field
 /// `hop`.
 pub fn extract_required(hop: &'static str, span: &Span, c: &TraceCarrier) {
+    let valid = propagation::parent(span, getter(c));
     #[cfg(feature = "otel")]
     {
-        let valid = propagation::parent(span, getter(c));
         let malformed = c.traceparent.as_deref().is_some_and(|v| !v.is_empty());
         if !valid && !malformed && otel_active() {
             emit_trace_missing(hop);
         }
     }
     #[cfg(not(feature = "otel"))]
-    {
-        let _ = (hop, span, c);
-    }
+    let _ = (hop, valid);
 }
 
 /// `parent_on` for an entry point that may legitimately get no trace. It is
 /// silent when the carrier is empty. `name` is recorded on the span as
-/// `ingress`.
-#[cfg(feature = "otel")]
+/// `ingress` (with the `otel` feature).
 pub fn extract_ingress(name: &'static str, span: &Span, c: &TraceCarrier) {
     propagation::parent(span, getter(c));
+    #[cfg(feature = "otel")]
     span.set_attribute("ingress", name);
+    #[cfg(not(feature = "otel"))]
+    let _ = (name, span);
 }
-
-/// `extract_ingress` with the otel feature off: no span layer, so nothing is
-/// parented and no attribute is set.
-#[cfg(not(feature = "otel"))]
-pub fn extract_ingress(_name: &'static str, _span: &Span, _c: &TraceCarrier) {}
 
 /// `c` with label `key` set to `value`: the entry is replaced in place when
 /// the carrier's baggage has the key, otherwise appended. Everything else in
@@ -288,23 +278,17 @@ pub fn root(name: &'static str) -> Span {
 
 /// The labels of the current span's baggage. See `carrier` for carrying them.
 pub mod context {
-    #[cfg(feature = "otel")]
     use super::*;
 
     /// The most labels one span's baggage holds.
     pub const MAX_ENTRIES: usize = 24;
 
-    /// Adds a label to the current span's baggage and records it as a span
-    /// attribute. Children and outgoing carriers inherit it. Over the baggage
-    /// caps it is dropped and recorded.
-    #[cfg(feature = "otel")]
+    /// Adds a label to the current span's baggage. With the `otel` feature it
+    /// is also recorded as a span attribute. Children and outgoing carriers
+    /// inherit it. Over the baggage caps it is dropped and recorded.
     pub fn add(field: &'static str, value: impl Into<String>) {
         baggage::add(&Span::current(), field, value.into());
     }
-
-    /// `add` with the otel feature off: no baggage, so nothing is added.
-    #[cfg(not(feature = "otel"))]
-    pub fn add(_field: &'static str, _value: impl Into<String>) {}
 
     /// Adds the labels of a `baggage` header to the current span, as `add`
     /// does for each entry in header order: a key the span already holds is
@@ -314,7 +298,7 @@ pub mod context {
     /// reserved `concord.` namespace is dropped), and the entries dropped,
     /// by the parse or by the span's caps, are recorded once as
     /// `concord.trace.baggage_dropped`. An empty header, or a span that
-    /// cannot hold baggage (no exporter), does nothing.
+    /// is not covered by the label layer (no `init`, or a disabled span), does nothing.
     ///
     /// A key repeated within one header keeps its last value, positioned where
     /// `parse` puts it. At the cap this can differ from calling `add` per
@@ -323,19 +307,16 @@ pub mod context {
     /// This is an explicit add, so it works on a span that was already
     /// entered. A span that is not entered is not the current span: call it
     /// inside `span.in_scope(|| ..)`, as with `add`.
-    #[cfg(feature = "otel")]
     pub fn add_from_baggage(header: &str) {
         baggage::add_header(&Span::current(), header);
     }
-
-    /// `add_from_baggage` with the otel feature off: no baggage, so nothing is added.
-    #[cfg(not(feature = "otel"))]
-    pub fn add_from_baggage(_header: &str) {}
 }
 
 /// Records, once each, an incoming `traceparent` that does not parse and a
 /// `tracestate` over its cap. Both are dropped and the request proceeds. A
-/// no-op where the span cannot hold baggage (no exporter).
+/// Now also runs without an exporter: an invalid `traceparent` or over-cap
+/// `tracestate` is reported in every build, which is intended.
+/// No-op where the span is not covered by the label layer.
 #[cfg(feature = "otel")]
 pub(crate) fn report_invalid(span: &Span, get: &impl Fn(&str) -> Option<String>, valid: bool) {
     if !baggage::installed(span) {

@@ -15,7 +15,9 @@ fn no_exporter_means_no_trace_missing() {
     carrier::extract_ingress("test.ingress", &span, &TraceCarrier::default());
     span.in_scope(|| {
         concord_telemetry::context::add("action_id", "A1");
-        assert!(carrier::capture().is_empty());
+        let c = carrier::capture();
+        assert_eq!(c.traceparent, None);
+        assert_eq!(c.baggage.as_deref(), Some("action_id=A1"));
     });
     tracing::info!(action_id = "a1", "local still works");
     #[allow(clippy::drop_non_drop)] // Guard has no Drop without `otel`

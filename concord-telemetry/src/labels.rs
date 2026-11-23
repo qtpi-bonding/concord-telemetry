@@ -7,12 +7,10 @@
 //! and keys travel percent-encoded. The whole `concord.` namespace is
 //! reserved and never read from or written to a header.
 //!
-//! [`parse`] and [`format`] are pure and work in every build. [`of`],
-//! [`add_once`] and [`record_once`] read and write a span's labels, which
-//! exist only with the `otel` feature and an installed exporter: without
-//! them they do nothing.
+//! [`parse`] and [`format`] are pure. [`of`], [`add_once`] and
+//! [`record_once`] read and write a span's labels in every build; they need a
+//! label layer, which `init` always installs.
 
-#[cfg(feature = "otel")]
 use crate::baggage;
 use crate::carrier::context::MAX_ENTRIES;
 use tracing::Span;
@@ -170,45 +168,28 @@ pub fn format(entries: &[(String, String)]) -> Option<String> {
     format_counted(entries).0
 }
 
-/// The value of label `key` on `span`. `None` when it has none, and without
-/// the `otel` feature or an installed exporter.
+/// The value of label `key` on `span`. `None` when it has none.
 pub fn of(span: &Span, key: &str) -> Option<String> {
-    #[cfg(feature = "otel")]
-    {
-        baggage::entries(span)
-            .into_iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v)
-    }
-    #[cfg(not(feature = "otel"))]
-    {
-        let _ = (span, key);
-        None
-    }
+    baggage::entries(span)
+        .into_iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v)
 }
 
 /// Adds label `key` to `span` unless it already has one or `value` is empty.
 /// Over the label caps it is dropped and recorded as
-/// `concord.trace.baggage_dropped`. Does nothing without the `otel` feature
-/// or an installed exporter.
+/// `concord.trace.baggage_dropped`.
 pub fn add_once(span: &Span, key: &'static str, value: &str) {
-    #[cfg(feature = "otel")]
     if !value.is_empty() && of(span, key).is_none() {
         baggage::add(span, key, value.to_owned());
     }
-    #[cfg(not(feature = "otel"))]
-    let _ = (span, key, value);
 }
 
 /// Records `value` into `span`'s declared `field`, unless the span already has
 /// a label of that name: the label wins, and the span never holds two values
-/// for the key. Does nothing without the `otel` feature or an installed
-/// exporter.
+/// for the key.
 pub fn record_once(span: &Span, field: &'static str, value: &str) {
-    #[cfg(feature = "otel")]
     if of(span, field).is_none() {
         span.record(field, value);
     }
-    #[cfg(not(feature = "otel"))]
-    let _ = (span, field, value);
 }

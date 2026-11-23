@@ -1,5 +1,9 @@
 //! Baggage: labels that travel with a trace, kept in span extensions.
 //!
+//! Always built: the labels travel through `carrier` and `propagation`
+//! without an exporter. With the `otel` feature `stamp` also sets each label
+//! as a span attribute, so the OpenTelemetry side sees it.
+//!
 //! Baggage is labels only, never authorization or routing. The caps are
 //! [`MAX_ENTRIES`] (24) entries, 64 bytes a key, 256 bytes a value (`labels`)
 //! and 8192 bytes for the whole header (`labels` parses and formats it). An
@@ -35,12 +39,14 @@
 //! runs (`Layered::enter` calls the inner subscriber first), so
 //! `Span::current()` is the entered span there.
 
+#[cfg(feature = "otel")]
 use opentelemetry::{Key, Value};
 use std::sync::Arc;
 #[cfg(feature = "testing")]
 use std::sync::{Mutex, PoisonError};
 use tracing::span::Id;
 use tracing::Span;
+#[cfg(feature = "otel")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::{Context as LayerContext, Layer};
 use tracing_subscriber::registry::{LookupSpan, Registry};
@@ -51,6 +57,7 @@ use crate::labels::{parse_counted as parse, valid};
 
 /// The attribute prefix under which labels are stamped. Reserved: no label
 /// or incoming baggage key may start with it.
+#[cfg(feature = "otel")]
 pub(crate) use concord_fields::LABEL_PREFIX;
 
 #[cfg(feature = "testing")]
@@ -78,18 +85,19 @@ fn enter_hook() {
 #[derive(Clone, Debug)]
 pub(crate) struct Label {
     /// The key as the carrier and logs have it.
-    pub key: Key,
+    pub key: Arc<str>,
     /// `concord.label.<key>`, the key the span attribute is stamped under.
-    stamp_key: Key,
+    #[cfg(feature = "otel")]
+    stamp_key: Arc<str>,
     pub value: Arc<str>,
 }
 
 impl Label {
     fn new(key: &str, value: &str) -> Self {
-        let stamp_key: Arc<str> = Arc::from(format!("{LABEL_PREFIX}{key}"));
         Self {
-            key: Key::from(Arc::<str>::from(key)),
-            stamp_key: Key::from(stamp_key),
+            key: Arc::from(key),
+            #[cfg(feature = "otel")]
+            stamp_key: Arc::from(format!("{LABEL_PREFIX}{key}")),
             value: Arc::from(value),
         }
     }
@@ -97,7 +105,13 @@ impl Label {
     fn stamp(&self, span: &Span) {
         #[cfg(feature = "testing")]
         STAMPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        span.set_attribute(self.stamp_key.clone(), Value::from(Arc::clone(&self.value)));
+        #[cfg(feature = "otel")]
+        span.set_attribute(
+            Key::from(Arc::clone(&self.stamp_key)),
+            Value::from(Arc::clone(&self.value)),
+        );
+        #[cfg(not(feature = "otel"))]
+        let _ = span;
     }
 }
 
@@ -347,20 +361,20 @@ fn try_add(span: &Span, key: &str, value: String) -> Option<bool> {
         let map = extensions.get_mut::<BaggageMap>()?;
         map.entered = true;
         let fits = valid(key, &value)
-            && (map.labels.len() < MAX_ENTRIES || map.labels.iter().any(|l| l.key.as_str() == key));
+            && (map.labels.len() < MAX_ENTRIES || map.labels.iter().any(|l| &*l.key == key));
         if !fits {
             return Some(Added::Dropped);
         }
         if map
             .labels
             .iter()
-            .any(|l| l.key.as_str() == key && *l.value == *value)
+            .any(|l| &*l.key == key && *l.value == *value)
         {
             return Some(Added::Unchanged);
         }
         let label = Label::new(key, &value);
         let labels = Arc::make_mut(&mut map.labels);
-        labels.retain(|l| l.key.as_str() != key);
+        labels.retain(|l| &*l.key != key);
         labels.push(label.clone());
         map.generation += 1;
         Some(Added::Changed(label, map.generation))
@@ -390,17 +404,20 @@ fn entered_with_labels(span: &Span) -> bool {
 }
 
 /// Parses an incoming header into `span`'s baggage, recording what was
-/// dropped. A no-op where the span cannot hold baggage, and on a span that was
-/// already entered with labels: like `set_parent`, it is refused.
-pub(crate) fn ingest(span: &Span, header: &str) {
+/// dropped, and returns the kept entries. `None` when it is refused: the span
+/// cannot hold baggage, or it was already entered with labels (like
+/// `set_parent`, a started span refuses new baggage).
+pub(crate) fn ingest(span: &Span, header: &str) -> Option<Vec<(String, String)>> {
     if !installed(span) || entered_with_labels(span) {
-        return;
+        return None;
     }
     let (kept, dropped) = parse(header);
     if dropped > 0 {
         crate::carrier::emit_baggage_dropped(dropped);
     }
-    set(span, kept);
+    set(span, kept.clone());
+    // The kept entries, returned for the Task 4 snapshot.
+    Some(kept)
 }
 
 /// The entries as a `baggage` header, in order, stopping before the header

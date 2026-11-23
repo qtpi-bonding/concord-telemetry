@@ -1,12 +1,14 @@
-//! W3C trace context across process boundaries.
+//! W3C trace context and labels across process boundaries.
 //!
 //! A carrier is anything with string keys: gRPC metadata (see `grpc`), NATS
 //! headers, or the `TRACEPARENT` environment variable for hooks and CLIs.
-//! Without an OTLP exporter there is no OpenTelemetry span layer, so nothing
-//! is injected and `set_parent` does nothing.
+//! The `baggage` header always carries the labels. The `traceparent` and
+//! `tracestate` headers need the `otel` feature and an exporter; without them
+//! `inject` writes only `baggage` and `set_parent` takes only the baggage.
 
+use crate::baggage;
 #[cfg(feature = "otel")]
-use crate::{baggage, carrier};
+use crate::carrier;
 #[cfg(feature = "otel")]
 use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
 #[cfg(feature = "otel")]
@@ -33,18 +35,21 @@ pub fn traceparent() -> Option<String> {
 }
 
 /// Writes the current span's `traceparent`, and `tracestate` when it is not
-/// empty, through `set`, then its `baggage` when it has any.
-#[cfg(feature = "otel")]
+/// empty, through `set` (with the `otel` feature and a valid context), then its
+/// `baggage` when it has any. Writes only to the map `set` is given.
 pub fn inject(mut set: impl FnMut(&str, String)) {
-    const KEYS: [&str; 2] = ["traceparent", "tracestate"];
     let current = tracing::Span::current();
-    let context = current.context();
-    if context.span().span_context().is_valid() {
-        let mut carrier = HashMap::new();
-        TraceContextPropagator::new().inject_context(&context, &mut Carrier(&mut carrier));
-        for key in KEYS {
-            if let Some(value) = carrier.remove(key).filter(|value| !value.is_empty()) {
-                set(key, value);
+    #[cfg(feature = "otel")]
+    {
+        const KEYS: [&str; 2] = ["traceparent", "tracestate"];
+        let context = current.context();
+        if context.span().span_context().is_valid() {
+            let mut carrier = HashMap::new();
+            TraceContextPropagator::new().inject_context(&context, &mut Carrier(&mut carrier));
+            for key in KEYS {
+                if let Some(value) = carrier.remove(key).filter(|value| !value.is_empty()) {
+                    set(key, value);
+                }
             }
         }
     }
@@ -53,40 +58,45 @@ pub fn inject(mut set: impl FnMut(&str, String)) {
     }
 }
 
-/// `inject` with the otel feature off: nothing is written.
-#[cfg(not(feature = "otel"))]
-pub fn inject(_set: impl FnMut(&str, String)) {}
-
 /// Parents `span` on the context read through `get`, and takes its `baggage`.
 /// Call it before `span` is first entered. A carrier without a valid
-/// `traceparent` leaves the span's contextual parent in place.
+/// `traceparent` leaves the span's contextual parent in place. A span that was
+/// already started refuses the carrier's baggage too.
 pub fn set_parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>) {
     parent(span, get);
 }
 
-/// `set_parent`, saying whether the carrier held a valid `traceparent`.
-#[cfg(feature = "otel")]
+/// `set_parent`, saying whether the carrier held a valid `traceparent`. The
+/// baggage is taken unless the span was already started. Without the `otel`
+/// feature no carrier is valid, so the baggage is always taken.
 pub(crate) fn parent(span: &tracing::Span, get: impl Fn(&str) -> Option<String>) -> bool {
-    let context = carrier::extract_context(&get);
-    let valid = context.span().span_context().is_valid();
-    carrier::report_invalid(span, &get, valid);
-    // An error means no OpenTelemetry parent can be set (no layer, span
-    // disabled, already started); none is worth reporting. A span that was
-    // already started refuses the carrier's baggage too.
-    let parented = !valid || span.set_parent(context).is_ok();
-    if parented {
+    #[cfg(feature = "otel")]
+    let valid = {
+        let context = carrier::extract_context(&get);
+        let valid = context.span().span_context().is_valid();
+        carrier::report_invalid(span, &get, valid);
+        // Only `AlreadyStarted` refuses the baggage. Other errors (no layer,
+        // span disabled) leave the span unparented but still take its labels.
+        let refused = valid
+            && matches!(
+                span.set_parent(context),
+                Err(tracing_opentelemetry::SetParentError::AlreadyStarted)
+            );
+        if !refused {
+            if let Some(header) = get("baggage") {
+                baggage::ingest(span, &header);
+            }
+        }
+        valid
+    };
+    #[cfg(not(feature = "otel"))]
+    let valid = {
         if let Some(header) = get("baggage") {
             baggage::ingest(span, &header);
         }
-    }
+        false
+    };
     valid
-}
-
-/// `parent` with the otel feature off: no parent is set and nothing is
-/// reported, so no carrier counts as valid.
-#[cfg(not(feature = "otel"))]
-pub(crate) fn parent(_span: &tracing::Span, _get: impl Fn(&str) -> Option<String>) -> bool {
-    false
 }
 
 /// `set_parent` from the `TRACEPARENT` and `BAGGAGE` environment variables.

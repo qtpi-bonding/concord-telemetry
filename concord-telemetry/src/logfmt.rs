@@ -21,7 +21,7 @@ use opentelemetry::logs::{AnyValue, LogRecord as _};
 #[cfg(feature = "otel")]
 use opentelemetry::trace::TraceContextExt;
 #[cfg(feature = "otel")]
-use opentelemetry::{Context, KeyValue, Value};
+use opentelemetry::{Context, Key, KeyValue, Value};
 #[cfg(feature = "otel")]
 use opentelemetry_sdk::logs::{LogProcessor, SdkLogRecord};
 #[cfg(feature = "otel")]
@@ -268,7 +268,10 @@ where
             match labels.filter(|labels| !labels.is_empty()) {
                 Some(labels) => {
                     let baggage = labels.iter().map(|label| {
-                        KeyValue::new(label.key.clone(), Value::from(Arc::clone(&label.value)))
+                        KeyValue::new(
+                            Key::from(Arc::clone(&label.key)),
+                            Value::from(Arc::clone(&label.value)),
+                        )
                     });
                     let _guard = Context::current().with_baggage(baggage).attach();
                     self.0.on_event(event, ctx);

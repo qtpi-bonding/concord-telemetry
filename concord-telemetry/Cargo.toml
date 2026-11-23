@@ -13,9 +13,9 @@ tls = ["otel", "opentelemetry-otlp/reqwest-rustls"]
 testing = ["otel", "opentelemetry_sdk/testing"]
 grpc-status = ["grpc", "coded-error/grpc", "dep:tonic"]
 grpc = ["dep:http", "dep:tower-layer", "dep:tower-service"]
-channel = ["dep:tokio"]
-lifecycle = ["dep:tokio"]
-http-server = ["dep:http", "dep:tower", "dep:tower-layer", "dep:tower-service", "dep:pin-project-lite"]
+channel = ["tokio/sync"]
+lifecycle = ["tokio/sync", "tokio/time", "tokio/signal", "tokio/macros"]
+http-server = ["dep:http", "dep:tower", "dep:tower-layer", "dep:tower-service"]
 
 [dependencies]
 concord-telemetry-proto = { git = "https://github.com/qtpi-bonding/concord-telemetry-proto.git", rev = "2c696ccd91396879ca8025ef9e8992126c5cfcee" }
@@ -40,8 +40,8 @@ tower-layer = { version = "0.3", optional = true }
 tower-service = { version = "0.3", optional = true }
 tower = { version = "0.5", optional = true }
 tonic = { version = ">=0.13, <0.15", default-features = false, optional = true }
-tokio = { version = "1", optional = true, features = ["sync", "rt", "time", "signal", "macros"] }
-pin-project-lite = { version = "0.2", optional = true }
+tokio = { version = "1", default-features = false, features = ["rt"] }
+pin-project-lite = "0.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
